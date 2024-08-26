@@ -201,9 +201,9 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 let _l = ray.dir; // Incoming Light
                 let _h = _v + (_l - _v) * 0.5; // Half-way Vector (between _v and _l)
                 let _r = normalize(-_l - 2.0 * dot(-_l, _n) * _n); // reflection vector
-                // let _t = vec3<f32>(0.0); // TODO
-                let v = _v * (vec3<f32>(1.0) - _n);//_n * dot(_v, _n);
-                let l = _l * (vec3<f32>(1.0) - _n);//_n * dot(_l, _n);
+                // let _t = cross(_n, _v);
+                // let v = normalize(cross(_n, _v));
+                // let l = normalize(cross(_n, _l));
 
                 // Color
                 let diffuse = material.albedo * dot(_n, _l);

@@ -126,7 +126,7 @@ fn extract_visible(
         });
     }
 
-    // Meta 1
+    // Query Meta
     *(raytrace_meta.objects.get_mut()) = objects;
     *(raytrace_meta.emissives.get_mut()) = emissives;
 
@@ -137,7 +137,7 @@ fn extract_visible(
         .emissives
         .write_buffer(&render_device, &render_queue);
 
-    // Meta 2
+    // Material Meta
     *(raytrace_meta.materials.get_mut()) = materials;
     *(raytrace_meta.textures.get_mut()) = textures;
     *(raytrace_meta.texture_data.get_mut()) = texture_data.data;
@@ -152,7 +152,7 @@ fn extract_visible(
         .texture_data
         .write_buffer(&render_device, &render_queue);
 
-    // Meta 3
+    // Mesh Meta
     *(raytrace_meta.meshes.get_mut()) = meshes;
     *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
     *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
