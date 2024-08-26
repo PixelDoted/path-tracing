@@ -23,7 +23,7 @@ use bevy::{
     utils::HashMap,
 };
 
-use crate::data::{self, MeshData, RayTraceMeta, RayTraceSettings, Vertex};
+use crate::data::{self, MeshData, RayTraceMeta, RayTraceSettings, TextureData, Vertex};
 
 pub struct RayTracePlugin;
 
@@ -43,6 +43,9 @@ impl Plugin for RayTracePlugin {
             emissives: StorageBuffer::default(),
 
             materials: StorageBuffer::default(),
+            textures: StorageBuffer::default(),
+            texture_data: StorageBuffer::default(),
+
             meshes: StorageBuffer::default(),
             indices: StorageBuffer::default(),
             vertices: StorageBuffer::default(),
@@ -51,7 +54,10 @@ impl Plugin for RayTracePlugin {
         render_app.add_systems(ExtractSchedule, extract_visible);
         render_app
             .add_render_graph_node::<ViewNodeRunner<RayTraceNode>>(Core3d, RayTraceLabel)
-            .add_render_graph_edges(Core3d, (Node3d::EndMainPass, RayTraceLabel, Node3d::Bloom));
+            .add_render_graph_edges(
+                Core3d,
+                (Node3d::EndMainPass, RayTraceLabel, Node3d::MotionBlur),
+            );
     }
 
     fn finish(&self, app: &mut App) {
@@ -78,6 +84,9 @@ fn extract_visible(
     let mut emissives = Vec::new();
 
     let mut materials = Vec::new();
+    let mut textures = Vec::new();
+    let mut texture_data = TextureData::default();
+
     let mut meshes = Vec::new();
     let mut mesh_data = MeshData::default();
     let mut handle_to_index_mat: HashMap<UntypedAssetId, usize> = HashMap::new();
@@ -93,6 +102,8 @@ fn extract_visible(
         materials.push(data::Material {
             albedo: material.base_color.into(),
             emissive: material.emissive,
+            roughness: material.perceptual_roughness,
+            metallic: material.metallic,
         });
     }
 
@@ -128,13 +139,24 @@ fn extract_visible(
 
     // Meta 2
     *(raytrace_meta.materials.get_mut()) = materials;
-    *(raytrace_meta.meshes.get_mut()) = meshes;
-    *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
-    *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+    *(raytrace_meta.textures.get_mut()) = textures;
+    *(raytrace_meta.texture_data.get_mut()) = texture_data.data;
 
     raytrace_meta
         .materials
         .write_buffer(&render_device, &render_queue);
+    raytrace_meta
+        .textures
+        .write_buffer(&render_device, &render_queue);
+    raytrace_meta
+        .texture_data
+        .write_buffer(&render_device, &render_queue);
+
+    // Meta 3
+    *(raytrace_meta.meshes.get_mut()) = meshes;
+    *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
+    *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+
     raytrace_meta
         .meshes
         .write_buffer(&render_device, &render_queue);

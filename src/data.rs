@@ -32,6 +32,20 @@ pub struct Object {
 pub struct Material {
     pub albedo: LinearRgba,
     pub emissive: LinearRgba,
+    pub roughness: f32,
+    pub metallic: f32,
+}
+
+#[derive(Component, Default, Clone, Copy, ShaderType)]
+pub struct Texture {
+    pub start: u32,
+    pub length: u32,
+    pub format: u32,
+}
+
+#[derive(Default)]
+pub struct TextureData {
+    pub data: Vec<u32>,
 }
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
@@ -63,9 +77,18 @@ pub struct RayTraceMeta {
     pub emissives: StorageBuffer<Vec<u32>>,
 
     pub materials: StorageBuffer<Vec<Material>>,
+    pub textures: StorageBuffer<Vec<Texture>>,
+    pub texture_data: StorageBuffer<Vec<u32>>,
+
     pub meshes: StorageBuffer<Vec<Mesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<Vertex>>,
+}
+
+impl TextureData {
+    pub fn append_texture(&mut self) {
+        todo!();
+    }
 }
 
 impl MeshData {

@@ -18,6 +18,9 @@ const U32_MAX: u32 = 4294967295; // 2**32-1
 @group(2) @binding(2) var<storage> indices: array<u32>;
 @group(2) @binding(3) var<storage> vertices: array<Vertex>;
 
+@group(3) @binding(0) var<storage> textures: array<Texture>;
+@group(3) @binding(1) var<storage> texture_data: array<u32>;
+
 // ---- Binding Data ----
 
 struct Settings {
@@ -37,7 +40,11 @@ struct Object {
 
 struct Material {
     albedo: vec3<f32>,
+    albedo_alpha: f32,
     emissive: vec3<f32>,
+    emissive_alpha: f32,
+    roughness: f32,
+    metallic: f32,
 }
 
 struct Mesh {
@@ -53,6 +60,12 @@ struct Vertex {
     position: vec3<f32>,
     normal: vec3<f32>,
     uv: vec2<f32>,
+}
+
+struct Texture {
+    start: u32,
+    length: u32,
+    format: u32,
 }
 
 // --- Runtime Data ----
@@ -118,19 +131,19 @@ fn rng_setup(uv: vec2<f32>) {
 
 // ---- Helper ----
 fn hugues_moller(n: vec3<f32>) -> mat3x3<f32> {
-    let a = abs(hit_record.n);
+    let a = abs(n);
     var t = vec3<f32>(0);
     if a.x <= a.y && a.x <= a.z {
-        t = vec3<f32>(0, -hit_record.n.z, hit_record.n.y);
+        t = vec3<f32>(0, -n.z, n.y);
     } else if a.y <= a.x && a.y <= a.z {
-        t = vec3<f32>(-hit_record.n.z, 0, hit_record.n.x);
+        t = vec3<f32>(-n.z, 0, n.x);
     } else {
-        t = vec3<f32>(-hit_record.n.y, hit_record.n.x, 0);
+        t = vec3<f32>(-n.y, n.x, 0);
     }
     t = normalize(t);
                     
-    let b = normalize(cross(hit_record.n, t));
-    return mat3x3<f32>(t, b, hit_record.n);
+    let b = normalize(cross(n, t));
+    return mat3x3<f32>(t, b, n);
 }
 
 // ---- BRDF ----
@@ -166,7 +179,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
             let hit = hit_all(ray);
             if hit != U32_MAX {
-            
                 let object = objects[hit];
                 let material = materials[object.mat];
                 let prev_ray_dir = ray.dir;
@@ -178,26 +190,26 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                     break;
                 }
 
-                // Scatter    
+                // Scatter
                 ray.dir = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
                 // ray.dir = normalize(ray.dir - 2.0 * dot(ray.dir, hit_record.n) * hit_record.n); // Reflection
-                ray.pos = hit_record.p + ray.dir * 0.001;
+                ray.pos = hit_record.p + ray.dir * 0.000001;
 
                 // BRDF Vectors
-                let _n = hit_record.n;
-                let _v = -prev_ray_dir;
-                let _l = ray.dir;
-                let _h = _v + (_l - _v) * 0.5;
-                let _r = normalize(-_l - 2.0 * dot(-_l, _n) * _n);
+                let _n = hit_record.n; // Surface Normal
+                let _v = -prev_ray_dir; // View Vector (Outgoing Light)
+                let _l = ray.dir; // Incoming Light
+                let _h = _v + (_l - _v) * 0.5; // Half-way Vector (between _v and _l)
+                let _r = normalize(-_l - 2.0 * dot(-_l, _n) * _n); // reflection vector
                 // let _t = vec3<f32>(0.0); // TODO
-                // let v = _n * dot(_v, _n);
-                // let l = _n * dot(_l, _n);
+                let v = _v * (vec3<f32>(1.0) - _n);//_n * dot(_v, _n);
+                let l = _l * (vec3<f32>(1.0) - _n);//_n * dot(_l, _n);
 
                 // Color
                 let diffuse = material.albedo * dot(_n, _l);
-                // let specular = vec3<f32>(1.0) * dot(_v, _r);
+                let specular = vec3<f32>(1.0) * max(dot(_v, _r), 0.0);
 
-                ray_color *= diffuse;// + specular;
+                ray_color *= diffuse + pow(specular, vec3<f32>(dot(_n, _l)));
             } else {
                 color += ray_color * settings.sky_color;
                 break;
@@ -215,7 +227,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             //     let object = objects[result];
             //     let material = materials[object.mat];
             //     color += ray_color * material.emissive;
-            // } 
+            // }
         }
 
         pixel_color += color;
@@ -318,11 +330,11 @@ fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
         }
 
         let _p = ray.pos + ray.dir * t;
-        let _n = normalize(va.normal * w + vb.normal * u + vc.normal * v);
+        let _n = va.normal * w + vb.normal * u + vc.normal * v;
 
         hit_record.t = t;
         hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
-        hit_record.n = ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz;
+        hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
         hit_record.uv = va.uv * w + vb.uv * v + vc.uv * u;
         hit = true;
     }
