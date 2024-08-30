@@ -1,12 +1,23 @@
 mod common;
 
-use bevy::{core_pipeline::bloom::BloomSettings, prelude::*};
+use bevy::{
+    core_pipeline::{
+        bloom::BloomSettings,
+        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+    },
+    prelude::*,
+};
 use common::{FlyCam, FlyCamPlugin};
 use path_tracing::{RayTracePlugin, RayTraceSettings};
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, RayTracePlugin, FlyCamPlugin))
+        .add_plugins((
+            DefaultPlugins,
+            RayTracePlugin,
+            FlyCamPlugin,
+            TemporalAntiAliasPlugin,
+        ))
         .add_systems(Startup, setup)
         .run();
 }
@@ -44,14 +55,19 @@ fn setup(
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::BLACK.into(),
         },
+        TemporalAntiAliasBundle::default(),
     ));
 
-    let white = materials.add(Color::linear_rgb(1.0, 1.0, 1.0));
-    let red = materials.add(Color::linear_rgb(1.0, 0.0, 0.0));
+    let white = materials.add(StandardMaterial {
+        base_color: Color::linear_rgb(1.0, 1.0, 1.0),
+        ..default()
+    });
+    let red = materials.add(StandardMaterial {
+        base_color: Color::linear_rgb(1.0, 0.0, 0.0),
+        ..default()
+    });
     let green = materials.add(StandardMaterial {
         base_color: Color::linear_rgb(0.0, 1.0, 0.0),
-        metallic: 1.0,
-        perceptual_roughness: 0.0,
         ..default()
     });
     let light = materials.add(StandardMaterial {

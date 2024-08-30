@@ -1,4 +1,5 @@
 use bevy::{
+    asset::UntypedAssetId,
     color::LinearRgba,
     ecs::{component::Component, system::Resource},
     math::{Mat4, Vec2, Vec3},
@@ -8,6 +9,7 @@ use bevy::{
         mesh::VertexAttributeValues,
         render_resource::{ShaderType, StorageBuffer},
     },
+    utils::HashMap,
 };
 
 #[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
@@ -34,6 +36,7 @@ pub struct Material {
     pub emissive: LinearRgba,
     pub roughness: f32,
     pub metallic: f32,
+    pub reflectance: f32,
 }
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
@@ -76,10 +79,12 @@ pub struct RayTraceMeta {
     pub objects: StorageBuffer<Vec<Object>>,
     pub emissives: StorageBuffer<Vec<u32>>,
 
+    pub handle_to_material: HashMap<UntypedAssetId, usize>,
     pub materials: StorageBuffer<Vec<Material>>,
     pub textures: StorageBuffer<Vec<Texture>>,
     pub texture_data: StorageBuffer<Vec<u32>>,
 
+    pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
     pub meshes: StorageBuffer<Vec<Mesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<Vertex>>,

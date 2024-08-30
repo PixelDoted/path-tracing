@@ -1,8 +1,10 @@
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 #import bevy_render::{view::View, globals::Globals}
+#import bevy_render::maths::{PI, HALF_PI}
+#import bevy_pbr::lighting;
+#import bevy_pbr::pbr_functions;
 
 const EPSILON: f32 = 4.88e-4;
-const PI: f32 = 3.141592653589793;
 const INFINITY: f32 = 10000000.0; // 10^8 
 const U32_MAX: u32 = 4294967295; // 2**32-1
 
@@ -19,7 +21,7 @@ const U32_MAX: u32 = 4294967295; // 2**32-1
 @group(2) @binding(3) var<storage> vertices: array<Vertex>;
 
 @group(3) @binding(0) var<storage> textures: array<Texture>;
-@group(3) @binding(1) var<storage> texture_data: array<u32>;
+@group(3) @binding(1) var<storage> texture_data: array<vec3<f32>>;
 
 // ---- Binding Data ----
 
@@ -45,6 +47,7 @@ struct Material {
     emissive_alpha: f32,
     roughness: f32,
     metallic: f32,
+    reflectance: f32,
 }
 
 struct Mesh {
@@ -63,9 +66,9 @@ struct Vertex {
 }
 
 struct Texture {
-    start: u32,
-    length: u32,
-    format: u32,
+    width: u32,
+    height: u32,
+    offset: u32,
 }
 
 // --- Runtime Data ----
@@ -80,6 +83,11 @@ struct HitRecord {
     p: vec3<f32>,
     n: vec3<f32>,
     uv: vec2<f32>,
+}
+
+struct BRDFOutput {
+    ray_dir: vec3<f32>,
+    color: vec3<f32>,
 }
 
 var<private> hit_record: HitRecord;
@@ -148,6 +156,49 @@ fn hugues_moller(n: vec3<f32>) -> mat3x3<f32> {
 
 // ---- BRDF ----
 
+fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
+    let lambertian_ray = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
+    let reflection_ray = normalize(ray.dir - 2.0 * dot(ray.dir, hit_record.n) * hit_record.n); // Reflection
+    let new_ray_dir = mix(reflection_ray, lambertian_ray, material.roughness);
+    
+    // BRDF Vectors
+    let N = hit_record.n; // Surface Normal
+    let V = -ray.dir; // View Vector (Outgoing Light)
+    let L = new_ray_dir; // Incoming Light
+    // let H = V + (L - V) * 0.5; // Half-way Vector (between _v and _l)
+    let R = normalize(-L - 2.0 * dot(-L, N) * N); // reflection vector
+    // let T = normalize(cross(N, V)); // normal tangent
+    // let v = normalize(V - (N * V)*N); // _v projected onto normal
+    // let l = normalize(L - (V * L)*N); // _l projected onto normal
+
+    // Dot Products
+    let NdotL = dot(N, L);
+    let NdotV = dot(N, V);
+    // let NdotH = dot(N, H);
+
+    // let LdotH = dot(L, H);
+
+    // Create Lighting Input
+    var lighting_input: lighting::LightingInput;
+    lighting_input.layers[lighting::LAYER_BASE].NdotV = NdotV;
+    lighting_input.layers[lighting::LAYER_BASE].N = N;
+    lighting_input.layers[lighting::LAYER_BASE].R = R;
+    lighting_input.layers[lighting::LAYER_BASE].perceptual_roughness = material.roughness;
+    lighting_input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(material.roughness);
+    lighting_input.P = hit_record.p;
+    lighting_input.V = V;
+    lighting_input.diffuse_color = material.albedo;
+    lighting_input.F0_ = pbr_functions::calculate_F0(material.albedo, material.metallic, material.reflectance);
+    lighting_input.F_ab = lighting::F_AB(material.roughness, NdotV);
+
+    var derived_lighting_input = lighting::derive_lighting_input(N, V, L);
+
+    let specular = lighting::specular(&lighting_input, &derived_lighting_input, material.reflectance);
+    let color = material.albedo * lighting::Fd_Burley(&lighting_input, &derived_lighting_input) + specular;
+
+    // Output
+    return BRDFOutput(new_ray_dir, color);
+}
 
 // ---- Entry ----
 
@@ -163,12 +214,12 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     for (var sample = 0u; sample < settings.samples; sample++) {
         // Setup
         // Orthographic
-        // ray.pos = view.world_position + (view.view * vec4<f32>(uv * 4.0, 0.0, 0.0)).xyz;
-        // ray.dir = normalize(view.view * vec4<f32>(0.0, 0.0, -1.0, 0.0)).xyz;
+        // ray.pos = view.world_position + (view.world_from_view * vec4<f32>(uv * 4.0, 0.0, 0.0)).xyz;
+        // ray.dir = normalize(view.world_from_view * vec4<f32>(0.0, 0.0, -1.0, 0.0)).xyz;
 
         // Perspective
         ray.pos = view.world_position;
-        ray.dir = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -0.95, 0.0)).xyz;
+        ray.dir = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -1.0, 0.0)).xyz;
         
         // Tracing
         var ray_color = vec3<f32>(1.0);
@@ -191,25 +242,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 }
 
                 // Scatter
-                ray.dir = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
-                // ray.dir = normalize(ray.dir - 2.0 * dot(ray.dir, hit_record.n) * hit_record.n); // Reflection
+                let brdf = calculate_brdf(ray, material);
+                ray.dir = brdf.ray_dir;
                 ray.pos = hit_record.p + ray.dir * 0.000001;
 
-                // BRDF Vectors
-                let _n = hit_record.n; // Surface Normal
-                let _v = -prev_ray_dir; // View Vector (Outgoing Light)
-                let _l = ray.dir; // Incoming Light
-                let _h = _v + (_l - _v) * 0.5; // Half-way Vector (between _v and _l)
-                let _r = normalize(-_l - 2.0 * dot(-_l, _n) * _n); // reflection vector
-                // let _t = cross(_n, _v);
-                // let v = normalize(cross(_n, _v));
-                // let l = normalize(cross(_n, _l));
-
-                // Color
-                let diffuse = material.albedo * dot(_n, _l);
-                let specular = vec3<f32>(1.0) * max(dot(_v, _r), 0.0);
-
-                ray_color *= diffuse + pow(specular, vec3<f32>(dot(_n, _l)));
+                ray_color *= brdf.color;
             } else {
                 color += ray_color * settings.sky_color;
                 break;
@@ -219,15 +256,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             if p < EPSILON {
                 break;
             }
-            ray_color *= 1.0 / p;
-
-            // indirect lighting
-            // let result = pick_emissive(ray);
-            // if result != U32_MAX {
-            //     let object = objects[result];
-            //     let material = materials[object.mat];
-            //     color += ray_color * material.emissive;
-            // }
+            ray_color *= 1.0 / (1.0 + p);
         }
 
         pixel_color += color;
@@ -235,38 +264,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     // Output
     return vec4<f32>(pixel_color / f32(settings.samples), 1.0);
-}
-
-// ---- Pick ----
-fn pick_emissive(_ray: Ray) -> u32 {
-    let rng = rand();
-    let emissive_index = u32(rng.x * f32(arrayLength(&emissives)));
-    let emissive = &emissives[emissive_index];
-    let object = &objects[*emissive];
-    let mesh = &meshes[(*object).mesh];
-    let tri = u32(rng.y * f32((*mesh).tri_count) * 3);
-
-    // Decode Triangle
-    let ai = indices[(*mesh).ihead + tri];
-    let bi = indices[(*mesh).ihead + tri + 1];
-    let ci = indices[(*mesh).ihead + tri + 2];
-
-    let va = vertices[(*mesh).vhead + ai];
-    let vb = vertices[(*mesh).vhead + bi];
-    let vc = vertices[(*mesh).vhead + ci];
-
-    // Get Point in triangle
-    let trng = normalize(rand());
-    let p = ((*object).local_to_world * vec4<f32>(va.position*trng.x + vb.position*trng.y + vc.position*trng.z, 1.0)).xyz;
-    var ray = _ray;
-    ray.dir = p - ray.pos;
-
-    // Out
-    if hit_all(ray) == *emissive {
-        return *emissive;
-    }
-
-    return U32_MAX;
 }
 
 // ---- Hit Checks ----

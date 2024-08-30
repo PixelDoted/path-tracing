@@ -42,16 +42,21 @@ impl Plugin for RayTracePlugin {
             objects: StorageBuffer::default(),
             emissives: StorageBuffer::default(),
 
+            handle_to_material: HashMap::new(),
             materials: StorageBuffer::default(),
             textures: StorageBuffer::default(),
             texture_data: StorageBuffer::default(),
 
+            handle_to_mesh: HashMap::new(),
             meshes: StorageBuffer::default(),
             indices: StorageBuffer::default(),
             vertices: StorageBuffer::default(),
         });
 
-        render_app.add_systems(ExtractSchedule, extract_visible);
+        render_app.add_systems(
+            ExtractSchedule,
+            ((extract_meshes, extract_materials), extract_visible).chain(),
+        );
         render_app
             .add_render_graph_node::<ViewNodeRunner<RayTraceNode>>(Core3d, RayTraceLabel)
             .add_render_graph_edges(
@@ -70,72 +75,75 @@ impl Plugin for RayTracePlugin {
 }
 
 // Extract
-
-fn extract_visible(
+fn extract_meshes(
     render_device: Extract<Res<RenderDevice>>,
     render_queue: Extract<Res<RenderQueue>>,
-
-    material_assets: Extract<Res<Assets<StandardMaterial>>>,
     mesh_assets: Extract<Res<Assets<Mesh>>>,
-    query: Extract<Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>>,
     mut raytrace_meta: ResMut<RayTraceMeta>,
 ) {
-    let mut objects = Vec::new();
-    let mut emissives = Vec::new();
+    if !mesh_assets.is_changed() {
+        return;
+    }
+
+    raytrace_meta.handle_to_mesh.clear();
+
+    let mut meshes = Vec::new();
+    let mut mesh_data = MeshData::default();
+
+    for (id, mesh) in mesh_assets.iter() {
+        raytrace_meta
+            .handle_to_mesh
+            .insert(id.untyped(), meshes.len());
+        meshes.push(mesh_data.append_mesh(mesh));
+    }
+
+    // Mesh Meta
+    *(raytrace_meta.meshes.get_mut()) = meshes;
+    *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
+    *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+
+    raytrace_meta
+        .meshes
+        .write_buffer(&render_device, &render_queue);
+    raytrace_meta
+        .indices
+        .write_buffer(&render_device, &render_queue);
+    raytrace_meta
+        .vertices
+        .write_buffer(&render_device, &render_queue);
+
+    debug!("Wrote meshes to gpu buffer");
+}
+
+fn extract_materials(
+    render_device: Extract<Res<RenderDevice>>,
+    render_queue: Extract<Res<RenderQueue>>,
+    material_assets: Extract<Res<Assets<StandardMaterial>>>,
+    mut raytrace_meta: ResMut<RayTraceMeta>,
+) {
+    if !material_assets.is_changed() {
+        return;
+    }
+
+    raytrace_meta.handle_to_material.clear();
 
     let mut materials = Vec::new();
     let mut textures = Vec::new();
     let mut texture_data = TextureData::default();
 
-    let mut meshes = Vec::new();
-    let mut mesh_data = MeshData::default();
-    let mut handle_to_index_mat: HashMap<UntypedAssetId, usize> = HashMap::new();
-    let mut handle_to_index_mesh: HashMap<UntypedAssetId, usize> = HashMap::new();
-
-    for (id, mesh) in mesh_assets.iter() {
-        handle_to_index_mesh.insert(id.untyped(), meshes.len());
-        meshes.push(mesh_data.append_mesh(mesh));
-    }
-
     for (id, material) in material_assets.iter() {
-        handle_to_index_mat.insert(id.untyped(), materials.len());
+        raytrace_meta
+            .handle_to_material
+            .insert(id.untyped(), materials.len());
+
         materials.push(data::Material {
             albedo: material.base_color.into(),
             emissive: material.emissive,
             roughness: material.perceptual_roughness,
             metallic: material.metallic,
+            reflectance: material.reflectance,
         });
     }
-
-    for (transform, mesh_handle, mat_handle) in query.iter() {
-        if let Some(mat) = material_assets.get(mat_handle) {
-            if mat.emissive.red > 0.0 || mat.emissive.green > 0.0 || mat.emissive.blue > 0.0 {
-                emissives.push(objects.len() as u32);
-            }
-        }
-
-        let local_to_world = transform.compute_matrix();
-        objects.push(data::Object {
-            world_to_local: local_to_world.inverse(),
-            local_to_world,
-
-            mat: *handle_to_index_mat.get(&mat_handle.id().untyped()).unwrap() as u32,
-            mesh: *handle_to_index_mesh
-                .get(&mesh_handle.id().untyped())
-                .unwrap() as u32,
-        });
-    }
-
-    // Query Meta
-    *(raytrace_meta.objects.get_mut()) = objects;
-    *(raytrace_meta.emissives.get_mut()) = emissives;
-
-    raytrace_meta
-        .objects
-        .write_buffer(&render_device, &render_queue);
-    raytrace_meta
-        .emissives
-        .write_buffer(&render_device, &render_queue);
 
     // Material Meta
     *(raytrace_meta.materials.get_mut()) = materials;
@@ -152,19 +160,52 @@ fn extract_visible(
         .texture_data
         .write_buffer(&render_device, &render_queue);
 
-    // Mesh Meta
-    *(raytrace_meta.meshes.get_mut()) = meshes;
-    *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
-    *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+    debug!("Wrote materials to gpu buffer");
+}
+
+fn extract_visible(
+    render_device: Extract<Res<RenderDevice>>,
+    render_queue: Extract<Res<RenderQueue>>,
+
+    material_assets: Extract<Res<Assets<StandardMaterial>>>,
+    query: Extract<Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>>,
+    mut raytrace_meta: ResMut<RayTraceMeta>,
+) {
+    let mut objects = Vec::new();
+    let mut emissives = Vec::new();
+
+    for (transform, mesh_handle, mat_handle) in query.iter() {
+        if let Some(mat) = material_assets.get(mat_handle) {
+            if mat.emissive.red > 0.0 || mat.emissive.green > 0.0 || mat.emissive.blue > 0.0 {
+                emissives.push(objects.len() as u32);
+            }
+        }
+
+        let local_to_world = transform.compute_matrix();
+        objects.push(data::Object {
+            world_to_local: local_to_world.inverse(),
+            local_to_world,
+
+            mat: *raytrace_meta
+                .handle_to_material
+                .get(&mat_handle.id().untyped())
+                .unwrap() as u32,
+            mesh: *raytrace_meta
+                .handle_to_mesh
+                .get(&mesh_handle.id().untyped())
+                .unwrap() as u32,
+        });
+    }
+
+    // Query Meta
+    *(raytrace_meta.objects.get_mut()) = objects;
+    *(raytrace_meta.emissives.get_mut()) = emissives;
 
     raytrace_meta
-        .meshes
+        .objects
         .write_buffer(&render_device, &render_queue);
     raytrace_meta
-        .indices
-        .write_buffer(&render_device, &render_queue);
-    raytrace_meta
-        .vertices
+        .emissives
         .write_buffer(&render_device, &render_queue);
 }
 
