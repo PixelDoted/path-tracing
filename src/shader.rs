@@ -137,8 +137,8 @@ fn extract_materials(
             .insert(id.untyped(), materials.len());
 
         materials.push(data::Material {
-            albedo: material.base_color.into(),
-            emissive: material.emissive,
+            albedo: material.base_color.to_linear().to_vec3(),
+            emissive: material.emissive.to_vec3(),
             roughness: material.perceptual_roughness,
             metallic: material.metallic,
             reflectance: material.reflectance,

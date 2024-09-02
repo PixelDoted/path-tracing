@@ -42,9 +42,7 @@ struct Object {
 
 struct Material {
     albedo: vec3<f32>,
-    albedo_alpha: f32,
     emissive: vec3<f32>,
-    emissive_alpha: f32,
     roughness: f32,
     metallic: f32,
     reflectance: f32,

@@ -32,8 +32,8 @@ pub struct Object {
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct Material {
-    pub albedo: LinearRgba,
-    pub emissive: LinearRgba,
+    pub albedo: Vec3,
+    pub emissive: Vec3,
     pub roughness: f32,
     pub metallic: f32,
     pub reflectance: f32,
