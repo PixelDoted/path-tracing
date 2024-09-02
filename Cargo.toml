@@ -26,5 +26,8 @@ name = "boxes"
 [[example]]
 name = "scene"
 
+[[example]]
+name = "texture"
+
 [dev-dependencies]
 log = "0.4.22"

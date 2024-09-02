@@ -23,7 +23,7 @@ use bevy::{
     utils::HashMap,
 };
 
-use crate::data::{self, MeshData, RayTraceMeta, RayTraceSettings, TextureData, Vertex};
+use crate::data::{self, MeshData, RayTraceMeta, RayTraceSettings, Texture, TextureData, Vertex};
 
 pub struct RayTracePlugin;
 
@@ -44,6 +44,8 @@ impl Plugin for RayTracePlugin {
 
             handle_to_material: HashMap::new(),
             materials: StorageBuffer::default(),
+
+            handle_to_texture: HashMap::new(),
             textures: StorageBuffer::default(),
             texture_data: StorageBuffer::default(),
 
@@ -55,7 +57,14 @@ impl Plugin for RayTracePlugin {
 
         render_app.add_systems(
             ExtractSchedule,
-            ((extract_meshes, extract_materials), extract_visible).chain(),
+            (
+                (
+                    extract_meshes,
+                    (extract_textures, extract_materials).chain(),
+                ),
+                extract_visible,
+            )
+                .chain(),
         );
         render_app
             .add_render_graph_node::<ViewNodeRunner<RayTraceNode>>(Core3d, RayTraceLabel)
@@ -80,12 +89,14 @@ fn extract_meshes(
     render_queue: Extract<Res<RenderQueue>>,
     mesh_assets: Extract<Res<Assets<Mesh>>>,
     mut raytrace_meta: ResMut<RayTraceMeta>,
+    mut mesh_count: Local<usize>,
 ) {
-    if !mesh_assets.is_changed() {
+    if mesh_assets.len() == *mesh_count {
         return;
     }
 
     raytrace_meta.handle_to_mesh.clear();
+    *mesh_count = mesh_assets.len();
 
     let mut meshes = Vec::new();
     let mut mesh_data = MeshData::default();
@@ -120,39 +131,97 @@ fn extract_materials(
     render_queue: Extract<Res<RenderQueue>>,
     material_assets: Extract<Res<Assets<StandardMaterial>>>,
     mut raytrace_meta: ResMut<RayTraceMeta>,
+    mut material_count: Local<usize>,
 ) {
-    if !material_assets.is_changed() {
+    if material_assets.len() == *material_count {
         return;
     }
 
     raytrace_meta.handle_to_material.clear();
+    *material_count = material_assets.len();
 
     let mut materials = Vec::new();
-    let mut textures = Vec::new();
-    let mut texture_data = TextureData::default();
 
     for (id, material) in material_assets.iter() {
         raytrace_meta
             .handle_to_material
             .insert(id.untyped(), materials.len());
 
+        let albedo_texture = material
+            .base_color_texture
+            .as_ref()
+            .map(|handle| raytrace_meta.handle_to_texture.get(&handle.id().untyped()))
+            .flatten();
+        let emissive_texture = material
+            .emissive_texture
+            .as_ref()
+            .map(|handle| raytrace_meta.handle_to_texture.get(&handle.id().untyped()))
+            .flatten();
+        let metallic_roughness_texture = material
+            .metallic_roughness_texture
+            .as_ref()
+            .map(|handle| raytrace_meta.handle_to_texture.get(&handle.id().untyped()))
+            .flatten();
+        let normal_map_texture = material
+            .normal_map_texture
+            .as_ref()
+            .map(|handle| raytrace_meta.handle_to_texture.get(&handle.id().untyped()))
+            .flatten();
+
         materials.push(data::Material {
             albedo: material.base_color.to_linear().to_vec3(),
+            albedo_texture: albedo_texture.map(|v| *v as u32).unwrap_or(u32::MAX),
             emissive: material.emissive.to_vec3(),
+            emissive_texture: emissive_texture.map(|v| *v as u32).unwrap_or(u32::MAX),
             roughness: material.perceptual_roughness,
             metallic: material.metallic,
+            metallic_roughness_texture: metallic_roughness_texture
+                .map(|v| *v as u32)
+                .unwrap_or(u32::MAX),
             reflectance: material.reflectance,
+            normal_map_texture: normal_map_texture.map(|v| *v as u32).unwrap_or(u32::MAX),
         });
     }
 
     // Material Meta
     *(raytrace_meta.materials.get_mut()) = materials;
-    *(raytrace_meta.textures.get_mut()) = textures;
-    *(raytrace_meta.texture_data.get_mut()) = texture_data.data;
 
     raytrace_meta
         .materials
         .write_buffer(&render_device, &render_queue);
+
+    debug!("Wrote materials to gpu buffer");
+}
+
+fn extract_textures(
+    render_device: Extract<Res<RenderDevice>>,
+    render_queue: Extract<Res<RenderQueue>>,
+    image_assets: Extract<Res<Assets<Image>>>,
+    mut raytrace_meta: ResMut<RayTraceMeta>,
+    mut image_count: Local<usize>,
+) {
+    if image_assets.len() == *image_count {
+        return;
+    }
+
+    raytrace_meta.handle_to_texture.clear();
+    *image_count = image_assets.len();
+
+    let mut textures = Vec::new();
+    let mut texture_data = TextureData::default();
+
+    for (id, image) in image_assets.iter() {
+        raytrace_meta
+            .handle_to_texture
+            .insert(id.untyped(), textures.len());
+
+        textures.push(texture_data.append_texture(image));
+    }
+
+    // Texture Meta
+    *(raytrace_meta.textures.get_mut()) = textures;
+    *(raytrace_meta.texture_data.get_mut()) = texture_data.data;
+
     raytrace_meta
         .textures
         .write_buffer(&render_device, &render_queue);
@@ -160,7 +229,7 @@ fn extract_materials(
         .texture_data
         .write_buffer(&render_device, &render_queue);
 
-    debug!("Wrote materials to gpu buffer");
+    debug!("Wrote textures to gpu buffer");
 }
 
 fn extract_visible(
@@ -287,6 +356,8 @@ impl ViewNode for RayTraceNode {
                         meta.meshes.binding().unwrap(),
                         meta.indices.binding().unwrap(),
                         meta.vertices.binding().unwrap(),
+                        meta.textures.binding().unwrap(),
+                        meta.texture_data.binding().unwrap(),
                     )),
                 ),
             )
@@ -378,6 +449,16 @@ impl FromWorld for RayTracePipeline {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(Vec::<Vertex>::min_size()),
+                    },
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(Vec::<Texture>::min_size()),
+                    },
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(Vec::<f32>::min_size()),
                     },
                 ),
             ),

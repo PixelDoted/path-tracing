@@ -19,9 +19,8 @@ const U32_MAX: u32 = 4294967295; // 2**32-1
 @group(2) @binding(1) var<storage> meshes: array<Mesh>;
 @group(2) @binding(2) var<storage> indices: array<u32>;
 @group(2) @binding(3) var<storage> vertices: array<Vertex>;
-
-@group(3) @binding(0) var<storage> textures: array<Texture>;
-@group(3) @binding(1) var<storage> texture_data: array<vec3<f32>>;
+@group(2) @binding(4) var<storage> textures: array<Texture>;
+@group(2) @binding(5) var<storage> texture_data: array<f32>;
 
 // ---- Binding Data ----
 
@@ -42,10 +41,14 @@ struct Object {
 
 struct Material {
     albedo: vec3<f32>,
+    albedo_texture: u32,
     emissive: vec3<f32>,
+    emissive_texture: u32,
     roughness: f32,
     metallic: f32,
+    metallic_roughness_texture: u32,
     reflectance: f32,
+    normal_map_texture: u32,
 }
 
 struct Mesh {
@@ -67,6 +70,7 @@ struct Texture {
     width: u32,
     height: u32,
     offset: u32,
+    format: u32,
 }
 
 // --- Runtime Data ----
@@ -152,47 +156,88 @@ fn hugues_moller(n: vec3<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(t, b, n);
 }
 
+// ---- Texture ----
+
+fn sample_texture(idx: u32, u: f32, v: f32) -> vec3<f32> {
+    let texture = textures[idx];
+    let x = u * f32(texture.width);
+    let y = v * f32(texture.height);
+    let i = texture.offset + (u32(x) + u32(y) * texture.height) * texture.format;
+
+    switch (texture.format) {
+        case 1u: {
+            let r = texture_data[i];
+            return vec3<f32>(r);
+        }
+        case 2u: {
+            let r = texture_data[i];
+            let g = texture_data[i + 1];
+            return vec3<f32>(r, g, 0.0);
+        }
+        case 3u: {
+            let r = texture_data[i];
+            let g = texture_data[i + 1];
+            let b = texture_data[i + 2];
+            return vec3<f32>(r, g, b);
+        }
+        case 4u: {
+            let r = texture_data[i];
+            let g = texture_data[i + 1];
+            let b = texture_data[i + 2];
+            let a = texture_data[i + 3];
+            return vec3<f32>(r, g, b) * a;
+        }
+        default: {
+            return vec3<f32>(1.0);
+        }
+    }
+}
+
 // ---- BRDF ----
 
 fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
     let lambertian_ray = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
     let reflection_ray = normalize(ray.dir - 2.0 * dot(ray.dir, hit_record.n) * hit_record.n); // Reflection
     let new_ray_dir = mix(reflection_ray, lambertian_ray, material.roughness);
+
+    var albedo = material.albedo;
+    var metallic = material.metallic;
+    var roughness = material.roughness;
+    if material.albedo_texture != U32_MAX {
+        albedo *= sample_texture(material.albedo_texture, hit_record.uv.x, hit_record.uv.y);
+    }
+    if material.metallic_roughness_texture != U32_MAX {
+        let mr = sample_texture(material.metallic_roughness_texture, hit_record.uv.x, hit_record.uv.y);
+    }
+    
     
     // BRDF Vectors
     let N = hit_record.n; // Surface Normal
     let V = -ray.dir; // View Vector (Outgoing Light)
     let L = new_ray_dir; // Incoming Light
-    // let H = V + (L - V) * 0.5; // Half-way Vector (between _v and _l)
     let R = normalize(-L - 2.0 * dot(-L, N) * N); // reflection vector
-    // let T = normalize(cross(N, V)); // normal tangent
-    // let v = normalize(V - (N * V)*N); // _v projected onto normal
-    // let l = normalize(L - (V * L)*N); // _l projected onto normal
 
     // Dot Products
     let NdotL = dot(N, L);
     let NdotV = dot(N, V);
-    // let NdotH = dot(N, H);
-
-    // let LdotH = dot(L, H);
 
     // Create Lighting Input
     var lighting_input: lighting::LightingInput;
     lighting_input.layers[lighting::LAYER_BASE].NdotV = NdotV;
     lighting_input.layers[lighting::LAYER_BASE].N = N;
     lighting_input.layers[lighting::LAYER_BASE].R = R;
-    lighting_input.layers[lighting::LAYER_BASE].perceptual_roughness = material.roughness;
-    lighting_input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(material.roughness);
+    lighting_input.layers[lighting::LAYER_BASE].perceptual_roughness = roughness;
+    lighting_input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(roughness);
     lighting_input.P = hit_record.p;
     lighting_input.V = V;
-    lighting_input.diffuse_color = material.albedo;
-    lighting_input.F0_ = pbr_functions::calculate_F0(material.albedo, material.metallic, material.reflectance);
-    lighting_input.F_ab = lighting::F_AB(material.roughness, NdotV);
+    lighting_input.diffuse_color = albedo;
+    lighting_input.F0_ = pbr_functions::calculate_F0(albedo, metallic, material.reflectance);
+    lighting_input.F_ab = lighting::F_AB(roughness, NdotV);
 
     var derived_lighting_input = lighting::derive_lighting_input(N, V, L);
 
     let specular = lighting::specular(&lighting_input, &derived_lighting_input, material.reflectance);
-    let color = material.albedo * lighting::Fd_Burley(&lighting_input, &derived_lighting_input) + specular;
+    let color = albedo * lighting::Fd_Burley(&lighting_input, &derived_lighting_input) + specular;
 
     // Output
     return BRDFOutput(new_ray_dir, color);
@@ -233,10 +278,20 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 let prev_ray_dir = ray.dir;
 
                 // Emissive
-                color += ray_color * material.emissive;
+                var emissive = material.emissive;
+                if material.emissive_texture != U32_MAX {
+                    emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
+                }
+                
+                color += ray_color * emissive;
                 if dot(material.albedo, material.albedo) < EPSILON {
                     // Skip Scatter, BRDF and RayColor
                     break;
+                }
+
+                // Normal
+                if material.normal_map_texture != U32_MAX {
+                    hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
                 }
 
                 // Scatter
@@ -326,11 +381,12 @@ fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
 
         let _p = ray.pos + ray.dir * t;
         let _n = va.normal * w + vb.normal * u + vc.normal * v;
+        let _uv = va.uv * w + vb.uv * u + vc.uv * v;
 
         hit_record.t = t;
         hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
         hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
-        hit_record.uv = va.uv * w + vb.uv * v + vc.uv * u;
+        hit_record.uv = _uv;
         hit = true;
     }
 

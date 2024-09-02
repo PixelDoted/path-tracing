@@ -3,7 +3,7 @@ use bevy::{
     color::LinearRgba,
     ecs::{component::Component, system::Resource},
     math::{Mat4, Vec2, Vec3},
-    prelude::Mesh as BevyMesh,
+    prelude::{Image, Mesh as BevyMesh},
     render::{
         extract_component::ExtractComponent,
         mesh::VertexAttributeValues,
@@ -33,22 +33,27 @@ pub struct Object {
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct Material {
     pub albedo: Vec3,
+    pub albedo_texture: u32,
     pub emissive: Vec3,
+    pub emissive_texture: u32,
     pub roughness: f32,
     pub metallic: f32,
+    pub metallic_roughness_texture: u32,
     pub reflectance: f32,
+    pub normal_map_texture: u32,
 }
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct Texture {
-    pub start: u32,
-    pub length: u32,
+    pub width: u32,
+    pub height: u32,
+    pub offset: u32,
     pub format: u32,
 }
 
 #[derive(Default)]
 pub struct TextureData {
-    pub data: Vec<u32>,
+    pub data: Vec<f32>,
 }
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
@@ -81,19 +86,15 @@ pub struct RayTraceMeta {
 
     pub handle_to_material: HashMap<UntypedAssetId, usize>,
     pub materials: StorageBuffer<Vec<Material>>,
+
+    pub handle_to_texture: HashMap<UntypedAssetId, usize>,
     pub textures: StorageBuffer<Vec<Texture>>,
-    pub texture_data: StorageBuffer<Vec<u32>>,
+    pub texture_data: StorageBuffer<Vec<f32>>,
 
     pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
     pub meshes: StorageBuffer<Vec<Mesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<Vertex>>,
-}
-
-impl TextureData {
-    pub fn append_texture(&mut self) {
-        todo!();
-    }
 }
 
 impl MeshData {
@@ -151,5 +152,68 @@ impl MeshData {
         }
 
         mesh
+    }
+}
+
+impl TextureData {
+    pub fn append_texture(&mut self, image: &Image) -> Texture {
+        use bevy::render::render_resource::TextureFormat as WgpuTextureFormat;
+        const DIV_255: f32 = 1.0 / 255.0;
+
+        let offset = self.data.len() as u32;
+        let format = match image.texture_descriptor.format {
+            WgpuTextureFormat::Rgba8UnormSrgb => {
+                image
+                    .data
+                    .chunks(1)
+                    .for_each(|c| self.data.push(c[0] as f32 * DIV_255));
+                4
+            }
+            WgpuTextureFormat::Rgba16Float => {
+                image.data.chunks(2).for_each(|c| {
+                    self.data
+                        .push(f16::from_le_bytes([c[0], c[1]]) as f32 * DIV_255)
+                });
+                4
+            }
+            WgpuTextureFormat::Rgb9e5Ufloat => {
+                image.data.chunks(4).for_each(|d| {
+                    let e = (d[3] << 2) & 0b011111;
+                    let r = [e | (d[0] >> 7), (d[0] << 1) | ((d[1] & 0b1) >> 7)];
+                    let g = [e | ((d[1] & 0b01) >> 6), (d[1] << 2) | ((d[2] & 0b11) >> 6)];
+                    let b = [
+                        e | ((d[2] & 0b001) >> 5),
+                        (d[2] << 3) | ((d[3] & 0b111) >> 5),
+                    ];
+
+                    self.data.push(f16::from_le_bytes(r) as f32);
+                    self.data.push(f16::from_le_bytes(g) as f32);
+                    self.data.push(f16::from_le_bytes(b) as f32);
+                });
+                3
+            }
+            WgpuTextureFormat::R8Unorm => {
+                image.data.chunks(1).for_each(|r| {
+                    self.data.push(r[0] as f32 * DIV_255);
+                });
+                1
+            }
+            WgpuTextureFormat::Rg8Unorm => {
+                image.data.chunks(1).for_each(|r| {
+                    self.data.push(r[0] as f32 * DIV_255);
+                });
+                2
+            }
+            f => {
+                panic!("Texture format {:?} is not supported.", f);
+            }
+        };
+
+        Texture {
+            width: image.width(),
+            height: image.height(),
+            offset,
+            format,
+        }
     }
 }
