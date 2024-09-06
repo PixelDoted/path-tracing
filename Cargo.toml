@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.14.0-rc", features = ["wayland"] }
+bvh = "0.10.0"
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]

@@ -1,5 +1,4 @@
 use bevy::{
-    asset::UntypedAssetId,
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
@@ -14,7 +13,7 @@ use bevy::{
             BindGroupLayoutEntries, BindingType, BufferBindingType, CachedRenderPipelineId,
             ColorTargetState, ColorWrites, FragmentState, MultisampleState, Operations,
             PipelineCache, PrimitiveState, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, ShaderStages, ShaderType, StorageBuffer, TextureFormat,
+            RenderPipelineDescriptor, ShaderStages, ShaderType, StorageBuffer,
         },
         renderer::{RenderDevice, RenderQueue},
         view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
@@ -23,7 +22,10 @@ use bevy::{
     utils::HashMap,
 };
 
-use crate::data::{self, MeshData, RayTraceMeta, RayTraceSettings, Texture, TextureData, Vertex};
+use crate::{
+    bvh,
+    data::{self, BvhNode, MeshData, RayTraceMeta, RayTraceSettings, Texture, TextureData, Vertex},
+};
 
 pub struct RayTracePlugin;
 
@@ -42,17 +44,18 @@ impl Plugin for RayTracePlugin {
             objects: StorageBuffer::default(),
             emissives: StorageBuffer::default(),
 
+            handle_to_mesh: HashMap::new(),
+            meshes: StorageBuffer::default(),
+            mesh_nodes: StorageBuffer::default(),
+            indices: StorageBuffer::default(),
+            vertices: StorageBuffer::default(),
+
             handle_to_material: HashMap::new(),
             materials: StorageBuffer::default(),
 
             handle_to_texture: HashMap::new(),
             textures: StorageBuffer::default(),
             texture_data: StorageBuffer::default(),
-
-            handle_to_mesh: HashMap::new(),
-            meshes: StorageBuffer::default(),
-            indices: StorageBuffer::default(),
-            vertices: StorageBuffer::default(),
         });
 
         render_app.add_systems(
@@ -99,22 +102,31 @@ fn extract_meshes(
     *mesh_count = mesh_assets.len();
 
     let mut meshes = Vec::new();
+    let mut mesh_nodes = Vec::new();
     let mut mesh_data = MeshData::default();
 
     for (id, mesh) in mesh_assets.iter() {
         raytrace_meta
             .handle_to_mesh
             .insert(id.untyped(), meshes.len());
-        meshes.push(mesh_data.append_mesh(mesh));
+
+        let mut mesh = mesh_data.append_mesh(mesh);
+        mesh.bvh_root = mesh_nodes.len() as u32;
+        mesh.bvh_size = bvh::generate(&mesh, &mesh_data, &mut mesh_nodes);
+        meshes.push(mesh);
     }
 
     // Mesh Meta
     *(raytrace_meta.meshes.get_mut()) = meshes;
+    *(raytrace_meta.mesh_nodes.get_mut()) = mesh_nodes;
     *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
     *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
 
     raytrace_meta
         .meshes
+        .write_buffer(&render_device, &render_queue);
+    raytrace_meta
+        .mesh_nodes
         .write_buffer(&render_device, &render_queue);
     raytrace_meta
         .indices
@@ -333,7 +345,7 @@ impl ViewNode for RayTraceNode {
                 )),
             )
         };
-        let (bind_group_1, bind_group_2) = {
+        let (bind_group_1, bind_group_2, bind_group_3) = {
             let Some(meta) = world.get_resource::<RayTraceMeta>() else {
                 println!("No RayTraceMeta");
                 return Ok(());
@@ -352,10 +364,17 @@ impl ViewNode for RayTraceNode {
                     "ray_trace_bind_group_2",
                     &ray_trace_pipeline.layout_2,
                     &BindGroupEntries::sequential((
-                        meta.materials.binding().unwrap(),
                         meta.meshes.binding().unwrap(),
+                        meta.mesh_nodes.binding().unwrap(),
                         meta.indices.binding().unwrap(),
                         meta.vertices.binding().unwrap(),
+                    )),
+                ),
+                render_context.render_device().create_bind_group(
+                    "ray_trace_bind_group_3",
+                    &ray_trace_pipeline.layout_3,
+                    &BindGroupEntries::sequential((
+                        meta.materials.binding().unwrap(),
                         meta.textures.binding().unwrap(),
                         meta.texture_data.binding().unwrap(),
                     )),
@@ -379,6 +398,7 @@ impl ViewNode for RayTraceNode {
         render_pass.set_bind_group(0, &bind_group_0, &[view_uniform_offset.offset]);
         render_pass.set_bind_group(1, &bind_group_1, &[]);
         render_pass.set_bind_group(2, &bind_group_2, &[]);
+        render_pass.set_bind_group(3, &bind_group_3, &[]);
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -390,6 +410,7 @@ struct RayTracePipeline {
     layout_0: BindGroupLayout,
     layout_1: BindGroupLayout,
     layout_2: BindGroupLayout,
+    layout_3: BindGroupLayout,
     pipeline_id: CachedRenderPipelineId,
 }
 
@@ -433,12 +454,12 @@ impl FromWorld for RayTracePipeline {
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: Some(Vec::<data::Material>::min_size()),
+                        min_binding_size: Some(Vec::<data::Mesh>::min_size()),
                     },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: Some(Vec::<data::Mesh>::min_size()),
+                        min_binding_size: Some(Vec::<data::BvhNode>::min_size()),
                     },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -449,6 +470,19 @@ impl FromWorld for RayTracePipeline {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(Vec::<Vertex>::min_size()),
+                    },
+                ),
+            ),
+        );
+        let layout_3 = render_device.create_bind_group_layout(
+            "ray_trace_bind_group_layout_3",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(Vec::<data::Material>::min_size()),
                     },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -473,7 +507,12 @@ impl FromWorld for RayTracePipeline {
                 .resource_mut::<PipelineCache>()
                 .queue_render_pipeline(RenderPipelineDescriptor {
                     label: Some("ray_trace_pipeline".into()),
-                    layout: vec![layout_0.clone(), layout_1.clone(), layout_2.clone()],
+                    layout: vec![
+                        layout_0.clone(),
+                        layout_1.clone(),
+                        layout_2.clone(),
+                        layout_3.clone(),
+                    ],
                     vertex: fullscreen_shader_vertex_state(),
                     fragment: Some(FragmentState {
                         shader,
@@ -495,6 +534,7 @@ impl FromWorld for RayTracePipeline {
             layout_0,
             layout_1,
             layout_2,
+            layout_3,
             pipeline_id,
         }
     }

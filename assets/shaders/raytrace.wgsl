@@ -15,12 +15,15 @@ const U32_MAX: u32 = 4294967295; // 2**32-1
 @group(1) @binding(0) var<storage> objects: array<Object>;
 @group(1) @binding(1) var<storage> emissives: array<u32>;
 
-@group(2) @binding(0) var<storage> materials: array<Material>;
-@group(2) @binding(1) var<storage> meshes: array<Mesh>;
+@group(2) @binding(0) var<storage> meshes: array<Mesh>;
+// @group(2) @binding(0) var<storage> meshes: array<u32>;
+@group(2) @binding(1) var<storage> mesh_nodes: array<MeshNode>;
 @group(2) @binding(2) var<storage> indices: array<u32>;
 @group(2) @binding(3) var<storage> vertices: array<Vertex>;
-@group(2) @binding(4) var<storage> textures: array<Texture>;
-@group(2) @binding(5) var<storage> texture_data: array<f32>;
+
+@group(3) @binding(0) var<storage> materials: array<Material>;
+@group(3) @binding(1) var<storage> textures: array<Texture>;
+@group(3) @binding(2) var<storage> texture_data: array<f32>;
 
 // ---- Binding Data ----
 
@@ -54,10 +57,20 @@ struct Material {
 struct Mesh {
     aabb_min: vec3<f32>,
     aabb_max: vec3<f32>,
+    bvh_root: u32,
+    bvh_size: u32,
     
     ihead: u32,
     vhead: u32,
     tri_count: u32,
+}
+
+struct MeshNode {
+    aabb_max: vec3<f32>,
+    aabb_min: vec3<f32>,
+    entry_index: u32,
+    exit_index: u32,
+    shape_index: u32,
 }
 
 struct Vertex {
@@ -78,6 +91,7 @@ struct Texture {
 struct Ray {
     pos: vec3<f32>,
     dir: vec3<f32>,
+    inv_dir: vec3<f32>,
 }
 
 struct HitRecord {
@@ -272,39 +286,39 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             hit_record.t = 1000.0;
 
             let hit = hit_all(ray);
-            if hit != U32_MAX {
-                let object = objects[hit];
-                let material = materials[object.mat];
-                let prev_ray_dir = ray.dir;
-
-                // Emissive
-                var emissive = material.emissive;
-                if material.emissive_texture != U32_MAX {
-                    emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
-                }
-                
-                color += ray_color * emissive;
-                if dot(material.albedo, material.albedo) < EPSILON {
-                    // Skip Scatter, BRDF and RayColor
-                    break;
-                }
-
-                // Normal
-                if material.normal_map_texture != U32_MAX {
-                    hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
-                }
-
-                // Scatter
-                let brdf = calculate_brdf(ray, material);
-                ray.dir = brdf.ray_dir;
-                ray.pos = hit_record.p + ray.dir * 0.000001;
-
-                ray_color *= brdf.color;
-            } else {
+            if hit == U32_MAX {
                 color += ray_color * settings.sky_color;
                 break;
             }
+                
+            let object = objects[hit];
+            let material = materials[object.mat];
+            let prev_ray_dir = ray.dir;
 
+            // Emissive
+            var emissive = material.emissive;
+            if material.emissive_texture != U32_MAX {
+                emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
+            }
+                
+            color += ray_color * emissive;
+            if dot(material.albedo, material.albedo) < EPSILON {
+                // Skip Scatter, BRDF and RayColor
+                break;
+            }
+
+            // Normal
+            if material.normal_map_texture != U32_MAX {
+                hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
+            }
+
+            // Scatter
+            let brdf = calculate_brdf(ray, material);
+            ray.dir = brdf.ray_dir;
+            ray.pos = hit_record.p + ray.dir * 0.000001;
+            ray_color *= brdf.color;
+
+            // Early Exit
             let p = max(ray_color.x, max(ray_color.y, ray_color.z));
             if p < EPSILON {
                 break;
@@ -335,68 +349,135 @@ fn hit_all(ray: Ray) -> u32 {
 fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
     let object = &objects[object_index];
     let mesh = &meshes[(*object).mesh];
-    var hit = false;
 
     // Ray World to Local space
     var ray = _ray;
     ray.pos = ((*object).world_to_local * vec4<f32>(ray.pos, 1.0)).xyz;
     ray.dir = ((*object).world_to_local * vec4<f32>(ray.dir, 0.0)).xyz;
+    ray.inv_dir = 1.0 / ray.dir;
 
-    // Ray-Box Test
-    let t_aabb = hit_box((*mesh).aabb_min, (*mesh).aabb_max, t_min, ray);
-    if t_aabb < t_min {
-        return false;
-    }
+    // Bvh Test
+    var node = mesh_nodes[(*mesh).bvh_root];
+    var iterations = 0u;
     
-    // Ray-Triangle tests
-    for (var i = 0u; i < (*mesh).tri_count; i++) {
-        let i = i * 3;
+    while (iterations < (*mesh).bvh_size) {
+        iterations += 1u;
 
-        let ai = indices[(*mesh).ihead + i];
-        let bi = indices[(*mesh).ihead + i + 1];
-        let ci = indices[(*mesh).ihead + i + 2];
+        if (node.entry_index == U32_MAX) {
+            let i = node.shape_index * 3;
 
-        var va = vertices[(*mesh).vhead + ai];
-        var vb = vertices[(*mesh).vhead + bi];
-        var vc = vertices[(*mesh).vhead + ci];
-        
-        // Möller–Trumbore
-        let edge_ab = vb.position - va.position;
-        let edge_ac = vc.position - va.position;
-        let n = cross(edge_ab, edge_ac);
-        let ao = ray.pos - va.position;
-        let dao = cross(ao, ray.dir);
+            let ia = indices[(*mesh).ihead + i];
+            let ib = indices[(*mesh).ihead + i + 1];
+            let ic = indices[(*mesh).ihead + i + 2];
 
-        let det = dot(-ray.dir, n);
-        let inv_det = 1.0 / det;
+            var va = vertices[(*mesh).vhead + ia];
+            var vb = vertices[(*mesh).vhead + ib];
+            var vc = vertices[(*mesh).vhead + ic];
 
-        let t = dot(ao, n) * inv_det;
-        let u = dot(edge_ac, dao) * inv_det;
-        let v = dot(-edge_ab, dao) * inv_det;
-        let w = 1.0 - u - v;
+            if hit_box(min(va.position, min(vb.position, vc.position)), max(va.position, max(vb.position, vc.position)), t_min, ray) < hit_record.t {
+                // Möller–Trumbore
+                let edge_ab = vb.position - va.position;
+                let edge_ac = vc.position - va.position;
+                let n = cross(edge_ab, edge_ac);
+                let ao = ray.pos - va.position;
+                let dao = cross(ao, ray.dir);
 
-        if det < EPSILON || t < t_min || t > hit_record.t || u < 0.0 || v < 0.0 || w < 0.0 {
-            continue;
+                let det = dot(-ray.dir, n);
+                let inv_det = 1.0 / det;
+
+                let t = dot(ao, n) * inv_det;
+                let u = dot(edge_ac, dao) * inv_det;
+                let v = dot(-edge_ab, dao) * inv_det;
+                let w = 1.0 - u - v;
+
+                if !(det < EPSILON || t < t_min || t > hit_record.t || u < 0.0 || v < 0.0 || w < 0.0) {
+                    let _p = ray.pos + ray.dir * t;
+                    let _n = va.normal * w + vb.normal * u + vc.normal * v;
+                    let _uv = va.uv * w + vb.uv * u + vc.uv * v;
+
+                    hit_record.t = t;
+                    hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
+                    hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
+                    hit_record.uv = _uv;
+                    return true;
+                }
+            }
+
+            node = mesh_nodes[(*mesh).bvh_root + node.exit_index];
         }
-
-        let _p = ray.pos + ray.dir * t;
-        let _n = va.normal * w + vb.normal * u + vc.normal * v;
-        let _uv = va.uv * w + vb.uv * u + vc.uv * v;
-
-        hit_record.t = t;
-        hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
-        hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
-        hit_record.uv = _uv;
-        hit = true;
+        
+        let index = select(node.exit_index, node.entry_index, hit_box(node.aabb_min, node.aabb_max, t_min, ray) < hit_record.t);
+        node = mesh_nodes[(*mesh).bvh_root + index];
     }
 
-    return hit;
+    return false;
 }
 
+// fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
+//     let object = &objects[object_index];
+//     let mesh = &meshes[(*object).mesh];
+//     var hit = false;
+
+//     // Ray World to Local space
+//     var ray = _ray;
+//     ray.pos = ((*object).world_to_local * vec4<f32>(ray.pos, 1.0)).xyz;
+//     ray.dir = ((*object).world_to_local * vec4<f32>(ray.dir, 0.0)).xyz;
+//     ray.inv_dir = 1.0 / ray.dir;
+
+//     // Ray-Box Test
+//     let t_aabb = hit_box((*mesh).aabb_min, (*mesh).aabb_max, t_min, ray);
+//     if t_aabb < t_min {
+//         return false;
+//     }
+    
+//     // Ray-Triangle tests
+//     for (var i = 0u; i < (*mesh).tri_count; i++) {
+//         let i = i * 3;
+
+//         let ia = indices[(*mesh).ihead + i];
+//         let ib = indices[(*mesh).ihead + i + 1];
+//         let ic = indices[(*mesh).ihead + i + 2];
+
+//         var va = vertices[(*mesh).vhead + ia];
+//         var vb = vertices[(*mesh).vhead + ib];
+//         var vc = vertices[(*mesh).vhead + ic];
+        
+//         // Möller–Trumbore
+//         let edge_ab = vb.position - va.position;
+//         let edge_ac = vc.position - va.position;
+//         let n = cross(edge_ab, edge_ac);
+//         let ao = ray.pos - va.position;
+//         let dao = cross(ao, ray.dir);
+
+//         let det = dot(-ray.dir, n);
+//         let inv_det = 1.0 / det;
+
+//         let t = dot(ao, n) * inv_det;
+//         let u = dot(edge_ac, dao) * inv_det;
+//         let v = dot(-edge_ab, dao) * inv_det;
+//         let w = 1.0 - u - v;
+
+//         if det < EPSILON || t < t_min || t > hit_record.t || u < 0.0 || v < 0.0 || w < 0.0 {
+//             continue;
+//         }
+
+//         let _p = ray.pos + ray.dir * t;
+//         let _n = va.normal * w + vb.normal * u + vc.normal * v;
+//         let _uv = va.uv * w + vb.uv * u + vc.uv * v;
+
+//         hit_record.t = t;
+//         hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
+//         hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
+//         hit_record.uv = _uv;
+//         hit = true;
+//     }
+
+//     return hit;
+// }
+
 fn hit_box(min: vec3<f32>, max: vec3<f32>, _tmin: f32, ray: Ray) -> f32 {
-    let inv_dir = 1.0 / ray.dir;
-    var tmin = (min - ray.pos) * inv_dir;
-    var tmax = (max - ray.pos) * inv_dir;
+    var tmin = (min - ray.pos) * ray.inv_dir;
+    var tmax = (max - ray.pos) * ray.inv_dir;
     
     let t1 = min(tmin, tmax);
     let t2 = max(tmin, tmax);

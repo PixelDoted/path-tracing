@@ -60,10 +60,21 @@ pub struct TextureData {
 pub struct Mesh {
     pub aabb_min: Vec3,
     pub aabb_max: Vec3,
+    pub bvh_root: u32,
+    pub bvh_size: u32,
 
     pub ihead: u32,
     pub vhead: u32,
     pub tri_count: u32,
+}
+
+#[derive(Default, Clone, Copy, ShaderType, Debug)]
+pub struct BvhNode {
+    pub aabb_min: Vec3,
+    pub aabb_max: Vec3,
+    pub entry_index: u32,
+    pub exit_index: u32,
+    pub shape_index: u32,
 }
 
 #[derive(Default, Clone, Copy, ShaderType)]
@@ -84,21 +95,23 @@ pub struct RayTraceMeta {
     pub objects: StorageBuffer<Vec<Object>>,
     pub emissives: StorageBuffer<Vec<u32>>,
 
+    pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
+    pub meshes: StorageBuffer<Vec<Mesh>>,
+    pub mesh_nodes: StorageBuffer<Vec<BvhNode>>,
+    pub indices: StorageBuffer<Vec<u32>>,
+    pub vertices: StorageBuffer<Vec<Vertex>>,
+
     pub handle_to_material: HashMap<UntypedAssetId, usize>,
     pub materials: StorageBuffer<Vec<Material>>,
 
     pub handle_to_texture: HashMap<UntypedAssetId, usize>,
     pub textures: StorageBuffer<Vec<Texture>>,
     pub texture_data: StorageBuffer<Vec<f32>>,
-
-    pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
-    pub meshes: StorageBuffer<Vec<Mesh>>,
-    pub indices: StorageBuffer<Vec<u32>>,
-    pub vertices: StorageBuffer<Vec<Vertex>>,
 }
 
 impl MeshData {
     pub fn append_mesh(&mut self, mesh: &BevyMesh) -> Mesh {
+        //Mesh {
         let indices = mesh.indices().expect("Mesh has no indices");
         let positions = mesh
             .attribute(BevyMesh::ATTRIBUTE_POSITION)
@@ -113,6 +126,8 @@ impl MeshData {
         let mut mesh = Mesh {
             aabb_min: Vec3::INFINITY,
             aabb_max: Vec3::NEG_INFINITY,
+            bvh_root: 0,
+            bvh_size: 0,
             ihead: self.indices.len() as u32,
             vhead: self.vertices.len() as u32,
             tri_count: (indices.len() / 3) as u32,

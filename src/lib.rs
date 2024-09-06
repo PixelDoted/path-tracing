@@ -1,4 +1,5 @@
 #![feature(f16)]
+mod bvh;
 pub mod data;
 pub mod shader;
 
