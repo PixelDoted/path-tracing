@@ -84,17 +84,16 @@ pub struct RayTraceMeta {
     pub objects: StorageBuffer<Vec<Object>>,
     pub emissives: StorageBuffer<Vec<u32>>,
 
-    pub handle_to_material: HashMap<UntypedAssetId, usize>,
-    pub materials: StorageBuffer<Vec<Material>>,
-
-    pub handle_to_texture: HashMap<UntypedAssetId, usize>,
-    pub textures: StorageBuffer<Vec<Texture>>,
-    pub texture_data: StorageBuffer<Vec<f32>>,
-
     pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
     pub meshes: StorageBuffer<Vec<Mesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<Vertex>>,
+
+    pub handle_to_material: HashMap<UntypedAssetId, usize>,
+    pub handle_to_texture: HashMap<UntypedAssetId, usize>,
+    pub materials: StorageBuffer<Vec<Material>>,
+    pub textures: StorageBuffer<Vec<Texture>>,
+    pub texture_data: StorageBuffer<Vec<f32>>,
 }
 
 impl MeshData {

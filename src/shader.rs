@@ -42,17 +42,16 @@ impl Plugin for RayTracePlugin {
             objects: StorageBuffer::default(),
             emissives: StorageBuffer::default(),
 
-            handle_to_material: HashMap::new(),
-            materials: StorageBuffer::default(),
-
-            handle_to_texture: HashMap::new(),
-            textures: StorageBuffer::default(),
-            texture_data: StorageBuffer::default(),
-
             handle_to_mesh: HashMap::new(),
             meshes: StorageBuffer::default(),
             indices: StorageBuffer::default(),
             vertices: StorageBuffer::default(),
+
+            handle_to_material: HashMap::new(),
+            handle_to_texture: HashMap::new(),
+            materials: StorageBuffer::default(),
+            textures: StorageBuffer::default(),
+            texture_data: StorageBuffer::default(),
         });
 
         render_app.add_systems(
@@ -333,7 +332,7 @@ impl ViewNode for RayTraceNode {
                 )),
             )
         };
-        let (bind_group_1, bind_group_2) = {
+        let (bind_group_1, bind_group_meshes, bind_group_materials) = {
             let Some(meta) = world.get_resource::<RayTraceMeta>() else {
                 println!("No RayTraceMeta");
                 return Ok(());
@@ -349,13 +348,19 @@ impl ViewNode for RayTraceNode {
                     )),
                 ),
                 render_context.render_device().create_bind_group(
-                    "ray_trace_bind_group_2",
-                    &ray_trace_pipeline.layout_2,
+                    "ray_trace_bind_group_meshes",
+                    &ray_trace_pipeline.layout_meshes,
                     &BindGroupEntries::sequential((
-                        meta.materials.binding().unwrap(),
                         meta.meshes.binding().unwrap(),
                         meta.indices.binding().unwrap(),
                         meta.vertices.binding().unwrap(),
+                    )),
+                ),
+                render_context.render_device().create_bind_group(
+                    "ray_trace_bind_group_materials",
+                    &ray_trace_pipeline.layout_materials,
+                    &BindGroupEntries::sequential((
+                        meta.materials.binding().unwrap(),
                         meta.textures.binding().unwrap(),
                         meta.texture_data.binding().unwrap(),
                     )),
@@ -378,7 +383,8 @@ impl ViewNode for RayTraceNode {
         render_pass.set_render_pipeline(pipeline);
         render_pass.set_bind_group(0, &bind_group_0, &[view_uniform_offset.offset]);
         render_pass.set_bind_group(1, &bind_group_1, &[]);
-        render_pass.set_bind_group(2, &bind_group_2, &[]);
+        render_pass.set_bind_group(2, &bind_group_meshes, &[]);
+        render_pass.set_bind_group(3, &bind_group_materials, &[]);
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -389,7 +395,8 @@ impl ViewNode for RayTraceNode {
 struct RayTracePipeline {
     layout_0: BindGroupLayout,
     layout_1: BindGroupLayout,
-    layout_2: BindGroupLayout,
+    layout_meshes: BindGroupLayout,
+    layout_materials: BindGroupLayout,
     pipeline_id: CachedRenderPipelineId,
 }
 
@@ -425,16 +432,11 @@ impl FromWorld for RayTracePipeline {
                 ),
             ),
         );
-        let layout_2 = render_device.create_bind_group_layout(
-            "ray_trace_bind_group_layout_2",
+        let layout_meshes = render_device.create_bind_group_layout(
+            "ray_trace_bind_group_layout_meshes",
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
-                    BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(Vec::<data::Material>::min_size()),
-                    },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -449,6 +451,19 @@ impl FromWorld for RayTracePipeline {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(Vec::<Vertex>::min_size()),
+                    },
+                ),
+            ),
+        );
+        let layout_materials = render_device.create_bind_group_layout(
+            "ray_trace_bind_group_layout_materials",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(Vec::<data::Material>::min_size()),
                     },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -473,7 +488,12 @@ impl FromWorld for RayTracePipeline {
                 .resource_mut::<PipelineCache>()
                 .queue_render_pipeline(RenderPipelineDescriptor {
                     label: Some("ray_trace_pipeline".into()),
-                    layout: vec![layout_0.clone(), layout_1.clone(), layout_2.clone()],
+                    layout: vec![
+                        layout_0.clone(),
+                        layout_1.clone(),
+                        layout_meshes.clone(),
+                        layout_materials.clone(),
+                    ],
                     vertex: fullscreen_shader_vertex_state(),
                     fragment: Some(FragmentState {
                         shader,
@@ -494,7 +514,8 @@ impl FromWorld for RayTracePipeline {
         Self {
             layout_0,
             layout_1,
-            layout_2,
+            layout_meshes,
+            layout_materials,
             pipeline_id,
         }
     }

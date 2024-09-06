@@ -15,12 +15,13 @@ const U32_MAX: u32 = 4294967295; // 2**32-1
 @group(1) @binding(0) var<storage> objects: array<Object>;
 @group(1) @binding(1) var<storage> emissives: array<u32>;
 
-@group(2) @binding(0) var<storage> materials: array<Material>;
-@group(2) @binding(1) var<storage> meshes: array<Mesh>;
-@group(2) @binding(2) var<storage> indices: array<u32>;
-@group(2) @binding(3) var<storage> vertices: array<Vertex>;
-@group(2) @binding(4) var<storage> textures: array<Texture>;
-@group(2) @binding(5) var<storage> texture_data: array<f32>;
+@group(2) @binding(0) var<storage> meshes: array<Mesh>;
+@group(2) @binding(1) var<storage> indices: array<u32>;
+@group(2) @binding(2) var<storage> vertices: array<Vertex>;
+
+@group(3) @binding(0) var<storage> materials: array<Material>;
+@group(3) @binding(1) var<storage> textures: array<Texture>;
+@group(3) @binding(2) var<storage> texture_data: array<f32>;
 
 // ---- Binding Data ----
 
