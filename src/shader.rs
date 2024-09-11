@@ -2,6 +2,7 @@ use bevy::{
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+        prepass::ViewPrepassTextures,
     },
     prelude::*,
     render::{
@@ -132,11 +133,7 @@ impl ViewNode for RayTraceNode {
             render_context.render_device().create_bind_group(
                 "ray_trace_bind_group_0",
                 &ray_trace_pipeline.layout_0,
-                &BindGroupEntries::sequential((
-                    view_uniforms,
-                    globals_uniforms.clone(),
-                    settings_binding.clone(),
-                )),
+                &BindGroupEntries::sequential((view_uniforms, globals_uniforms, settings_binding)),
             )
         };
         let (bind_group_1, bind_group_meshes, bind_group_materials) = {

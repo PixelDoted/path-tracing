@@ -198,7 +198,7 @@ fn sample_texture(idx: u32, u: f32, v: f32) -> vec3<f32> {
 
 fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
     let lambertian_ray = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
-    let reflection_ray = normalize(ray.dir - 2.0 * dot(ray.dir, hit_record.n) * hit_record.n); // Reflection
+    let reflection_ray = normalize(reflect(ray.dir, hit_record.n)); // Reflection
     let new_ray_dir = mix(reflection_ray, lambertian_ray, material.roughness);
 
     var albedo = material.albedo;
@@ -216,7 +216,7 @@ fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
     let N = hit_record.n; // Surface Normal
     let V = -ray.dir; // View Vector (Outgoing Light)
     let L = new_ray_dir; // Incoming Light
-    let R = normalize(-L - 2.0 * dot(-L, N) * N); // reflection vector
+    let R = normalize(reflect(-L, N)); // reflection vector
 
     // Dot Products
     let NdotL = dot(N, L);
