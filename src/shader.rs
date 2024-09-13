@@ -288,10 +288,6 @@ impl FromWorld for RayTracePipeline {
             ),
         );
 
-        let shader = world
-            .resource_mut::<AssetServer>()
-            .load("shaders/raytrace.wgsl");
-
         let pipeline_id =
             world
                 .resource_mut::<PipelineCache>()
@@ -305,7 +301,7 @@ impl FromWorld for RayTracePipeline {
                     ],
                     vertex: fullscreen_shader_vertex_state(),
                     fragment: Some(FragmentState {
-                        shader,
+                        shader: RT_SHADER_HANDLE,
                         shader_defs: vec![],
                         entry_point: "fragment".into(),
                         targets: vec![Some(ColorTargetState {
