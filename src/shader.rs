@@ -3,7 +3,6 @@ use bevy::{
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
-        prepass::ViewPrepassTextures,
     },
     prelude::*,
     render::{
@@ -30,12 +29,16 @@ use crate::{
 };
 
 const RT_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(11955195141264208704);
+const QUERY_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(1234134802034481255);
+const MATH_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(12086621635481247250);
 
 pub struct RayTracePlugin;
 
 impl Plugin for RayTracePlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(app, RT_SHADER_HANDLE, "raytrace.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, QUERY_SHADER_HANDLE, "query.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, MATH_SHADER_HANDLE, "math.wgsl", Shader::from_wgsl);
 
         app.add_plugins((
             ExtractComponentPlugin::<RayTraceSettings>::default(),

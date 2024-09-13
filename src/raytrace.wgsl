@@ -1,23 +1,18 @@
+#define_import_path path_tracing::raytrace
+
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 #import bevy_render::{view::View, globals::Globals}
 #import bevy_render::maths::{PI, HALF_PI}
 #import bevy_pbr::lighting;
 #import bevy_pbr::pbr_functions;
 
-const EPSILON: f32 = 4.88e-4;
-const INFINITY: f32 = 10000000.0; // 10^8 
-const U32_MAX: u32 = 4294967295; // 2**32-1
+#import path_tracing::math::{EPSILON, U32_MAX}
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var<uniform> settings: Settings;
 
-@group(1) @binding(0) var<storage> objects: array<Object>;
-@group(1) @binding(1) var<storage> emissives: array<u32>;
-
-@group(2) @binding(0) var<storage> meshes: array<Mesh>;
-@group(2) @binding(1) var<storage> indices: array<u32>;
-@group(2) @binding(2) var<storage> vertices: array<Vertex>;
+#import path_tracing::query::{Ray, HitRecord, hit_record, hit_all, objects};
 
 @group(3) @binding(0) var<storage> materials: array<Material>;
 @group(3) @binding(1) var<storage> textures: array<Texture>;
@@ -32,14 +27,6 @@ struct Settings {
     sky_color: vec3<f32>,
 }
 
-struct Object {
-    local_to_world: mat4x4<f32>,
-    world_to_local: mat4x4<f32>,
-    
-    mat: u32,
-    mesh: u32,
-}
-
 struct Material {
     albedo: vec3<f32>,
     albedo_texture: u32,
@@ -52,21 +39,6 @@ struct Material {
     normal_map_texture: u32,
 }
 
-struct Mesh {
-    aabb_min: vec3<f32>,
-    aabb_max: vec3<f32>,
-    
-    ihead: u32,
-    vhead: u32,
-    tri_count: u32,
-}
-
-struct Vertex {
-    position: vec3<f32>,
-    normal: vec3<f32>,
-    uv: vec2<f32>,
-}
-
 struct Texture {
     width: u32,
     height: u32,
@@ -76,24 +48,11 @@ struct Texture {
 
 // --- Runtime Data ----
 
-struct Ray {
-    pos: vec3<f32>,
-    dir: vec3<f32>,
-}
-
-struct HitRecord {
-    t: f32,
-    p: vec3<f32>,
-    n: vec3<f32>,
-    uv: vec2<f32>,
-}
-
 struct BRDFOutput {
     ray_dir: vec3<f32>,
     color: vec3<f32>,
 }
 
-var<private> hit_record: HitRecord;
 var<private> rng_state: vec3<u32>;
 
 // ---- Random ----
@@ -318,100 +277,4 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     // Output
     return vec4<f32>(pixel_color / f32(settings.samples), 1.0);
-}
-
-// ---- Hit Checks ----
-
-fn hit_all(ray: Ray) -> u32 {
-    var hit = U32_MAX;
-    for (var o = 0u; o < arrayLength(&objects); o++) {
-        if hit_mesh(o, 0.0001, ray) {
-            hit = o;
-        }
-    }
-
-    return hit;
-}
-
-fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
-    let object = &objects[object_index];
-    let mesh = &meshes[(*object).mesh];
-    var hit = false;
-
-    // Ray World to Local space
-    var ray = _ray;
-    ray.pos = ((*object).world_to_local * vec4<f32>(ray.pos, 1.0)).xyz;
-    ray.dir = ((*object).world_to_local * vec4<f32>(ray.dir, 0.0)).xyz;
-
-    // Ray-Box Test
-    let t_aabb = hit_box((*mesh).aabb_min, (*mesh).aabb_max, t_min, ray);
-    if t_aabb < t_min {
-        return false;
-    }
-    
-    // Ray-Triangle tests
-    for (var i = 0u; i < (*mesh).tri_count; i++) {
-        let i = i * 3;
-
-        let ai = indices[(*mesh).ihead + i];
-        let bi = indices[(*mesh).ihead + i + 1];
-        let ci = indices[(*mesh).ihead + i + 2];
-
-        var va = vertices[(*mesh).vhead + ai];
-        var vb = vertices[(*mesh).vhead + bi];
-        var vc = vertices[(*mesh).vhead + ci];
-        
-        // Möller–Trumbore
-        let edge_ab = vb.position - va.position;
-        let edge_ac = vc.position - va.position;
-        let n = cross(edge_ab, edge_ac);
-        let ao = ray.pos - va.position;
-        let dao = cross(ao, ray.dir);
-
-        let det = dot(-ray.dir, n);
-        let inv_det = 1.0 / det;
-
-        let t = dot(ao, n) * inv_det;
-        let u = dot(edge_ac, dao) * inv_det;
-        let v = dot(-edge_ab, dao) * inv_det;
-        let w = 1.0 - u - v;
-
-        if det < EPSILON || t < t_min || t > hit_record.t || u < 0.0 || v < 0.0 || w < 0.0 {
-            continue;
-        }
-
-        let _p = ray.pos + ray.dir * t;
-        let _n = va.normal * w + vb.normal * u + vc.normal * v;
-        let _uv = va.uv * w + vb.uv * u + vc.uv * v;
-
-        hit_record.t = t;
-        hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
-        hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
-        hit_record.uv = _uv;
-        hit = true;
-    }
-
-    return hit;
-}
-
-fn hit_box(min: vec3<f32>, max: vec3<f32>, _tmin: f32, ray: Ray) -> f32 {
-    let inv_dir = 1.0 / ray.dir;
-    var tmin = (min - ray.pos) * inv_dir;
-    var tmax = (max - ray.pos) * inv_dir;
-    
-    let t1 = min(tmin, tmax);
-    let t2 = max(tmin, tmax);
-    let dst_near = max(max(t1.x, t1.y), t1.z);
-    let dst_far = min(min(t2.x, t2.y), t2.z);
-
-    let hit = dst_far >= dst_near && dst_far > 0;
-    if hit {
-        if dst_near > 0.0 {
-            return dst_near;
-        } else {
-            return INFINITY;
-        }
-    } else {
-        return 0.0;
-    }
 }
