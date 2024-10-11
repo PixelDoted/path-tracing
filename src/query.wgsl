@@ -47,6 +47,7 @@ struct HitRecord {
     p: vec3<f32>,
     n: vec3<f32>,
     uv: vec2<f32>,
+    area: f32,
 }
 
 var<private> hit_record: HitRecord;
@@ -114,10 +115,13 @@ fn hit_mesh(object_index: u32, t_min: f32, _ray: Ray) -> bool {
         let _n = va.normal * w + vb.normal * u + vc.normal * v;
         let _uv = va.uv * w + vb.uv * u + vc.uv * v;
 
+        let area = length(cross(edge_ab, edge_ac)) * 0.5;
+
         hit_record.t = t;
         hit_record.p = ((*object).local_to_world * vec4<f32>(_p, 1.0)).xyz;
         hit_record.n = normalize( ((*object).local_to_world * vec4<f32>(_n, 0.0)).xyz );
         hit_record.uv = _uv;
+        hit_record.area = area;
         hit = true;
     }
 

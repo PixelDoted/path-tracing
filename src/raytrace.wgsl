@@ -12,7 +12,7 @@
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var<uniform> settings: Settings;
 
-#import path_tracing::query::{Ray, HitRecord, hit_record, hit_all, objects};
+#import path_tracing::query::{Ray, HitRecord, hit_record, hit_all, objects, emissives, meshes, indices, vertices};
 
 @group(3) @binding(0) var<storage> materials: array<Material>;
 @group(3) @binding(1) var<storage> textures: array<Texture>;
@@ -229,20 +229,20 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         var color = vec3<f32>(0.0);
 
         for (var bounce = 0u; bounce < settings.bounces; bounce++) {
-            hit_record.t = 1000.0;
+            hit_record.t = 10000.0;
 
             let hit = hit_all(ray);
+            let prev_ray = ray;
             if hit != U32_MAX {
                 let object = objects[hit];
                 let material = materials[object.mat];
-                let prev_ray_dir = ray.dir;
 
                 // Emissive
                 var emissive = material.emissive;
                 if material.emissive_texture != U32_MAX {
                     emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
                 }
-                
+
                 color += ray_color * emissive;
                 if dot(material.albedo, material.albedo) < EPSILON {
                     // Skip Scatter, BRDF and RayColor
@@ -257,8 +257,18 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 // Scatter
                 let brdf = calculate_brdf(ray, material);
                 ray.dir = brdf.ray_dir;
-                ray.pos = hit_record.p + ray.dir * 0.000001;
+                ray.pos = hit_record.p;
 
+                var scattering_pdf = 0.0;
+                let cos_theta = dot(hit_record.n, normalize(ray.dir));
+                if cos_theta > 0.0 {
+                    scattering_pdf = cos_theta/PI;
+                }
+                
+                
+                var pdf_value = hit_record.t * hit_record.t * dot(ray.dir, ray.dir);
+                pdf_value /= abs(dot(ray.dir, hit_record.n) / sqrt(dot(ray.dir, ray.dir))) * hit_record.area;
+                
                 ray_color *= brdf.color;
             } else {
                 color += ray_color * settings.sky_color;
@@ -270,6 +280,29 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 break;
             }
             ray_color *= 1.0 / (1.0 + p);
+
+            hit_record.t = 10000.0;
+            let sample = sample_light(prev_ray);
+            if sample.hit != U32_MAX {
+                let object = objects[sample.hit];
+                let material = materials[object.mat];
+                
+                var emissive = material.emissive;
+                if material.emissive_texture != U32_MAX {
+                    emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
+                }
+
+                var scattering_pdf = 0.0;
+                let cos_theta = dot(hit_record.n, normalize(sample.ray_dir));
+                if cos_theta > 0.0 {
+                    scattering_pdf = cos_theta/PI;
+                }
+                
+                var pdf_value = hit_record.t * hit_record.t * dot(sample.ray_dir, sample.ray_dir);
+                pdf_value /= abs(dot(sample.ray_dir, hit_record.n) / sqrt(dot(sample.ray_dir, sample.ray_dir))) * hit_record.area;
+                
+                color += ray_color * (emissive * scattering_pdf / pdf_value);
+            }
         }
 
         pixel_color += color;
@@ -277,4 +310,39 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     // Output
     return vec4<f32>(pixel_color / f32(settings.samples), 1.0);
+}
+
+struct SampledLight {
+    hit: u32,
+    ray_dir: vec3<f32>,
+}
+
+fn sample_light(_ray: Ray) -> SampledLight {
+    let rng = rand();
+    let emissive = emissives[u32(rng.x * f32(arrayLength(&emissives)))];
+    let object = &objects[emissive];
+    let mesh = &meshes[(*object).mesh];
+    let tri = u32(rng.y * f32((*mesh).tri_count)) * 3;
+
+    // Get point on triangle
+    let ai = indices[(*mesh).ihead + tri];
+    let bi = indices[(*mesh).ihead + tri + 1];
+    let ci = indices[(*mesh).ihead + tri + 2];
+    
+    var va = vertices[(*mesh).vhead + ai];
+    var vb = vertices[(*mesh).vhead + bi];
+    var vc = vertices[(*mesh).vhead + ci];
+
+    let brng = rand_unit(); // Get random barycentrics
+    let point = ((*object).local_to_world * vec4<f32>(va.position * brng.x + vb.position * brng.y + vc.position * brng.z, 1.0)).xyz;
+
+    // Get ray
+    var ray = _ray;
+    ray.dir = normalize(point - ray.pos);
+
+    if hit_all(ray) == emissive {
+        return SampledLight(emissive, ray.dir);
+    }
+
+    return SampledLight(U32_MAX, ray.dir);
 }

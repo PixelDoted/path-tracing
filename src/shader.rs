@@ -150,32 +150,44 @@ impl ViewNode for RayTraceNode {
                 return Ok(());
             };
 
+            let (
+                Some(objects),
+                Some(emissives),
+                Some(meshes),
+                Some(indices),
+                Some(vertices),
+                Some(materials),
+                Some(textures),
+                Some(texture_data),
+            ) = (
+                meta.objects.binding(),
+                meta.emissives.binding(),
+                meta.meshes.binding(),
+                meta.indices.binding(),
+                meta.vertices.binding(),
+                meta.materials.binding(),
+                meta.textures.binding(),
+                meta.texture_data.binding(),
+            )
+            else {
+                return Ok(());
+            };
+
             (
                 render_context.render_device().create_bind_group(
                     "ray_trace_bind_group_1",
                     &ray_trace_pipeline.layout_1,
-                    &BindGroupEntries::sequential((
-                        meta.objects.binding().unwrap(),
-                        meta.emissives.binding().unwrap(),
-                    )),
+                    &BindGroupEntries::sequential((objects, emissives)),
                 ),
                 render_context.render_device().create_bind_group(
                     "ray_trace_bind_group_meshes",
                     &ray_trace_pipeline.layout_meshes,
-                    &BindGroupEntries::sequential((
-                        meta.meshes.binding().unwrap(),
-                        meta.indices.binding().unwrap(),
-                        meta.vertices.binding().unwrap(),
-                    )),
+                    &BindGroupEntries::sequential((meshes, indices, vertices)),
                 ),
                 render_context.render_device().create_bind_group(
                     "ray_trace_bind_group_materials",
                     &ray_trace_pipeline.layout_materials,
-                    &BindGroupEntries::sequential((
-                        meta.materials.binding().unwrap(),
-                        meta.textures.binding().unwrap(),
-                        meta.texture_data.binding().unwrap(),
-                    )),
+                    &BindGroupEntries::sequential((materials, textures, texture_data)),
                 ),
             )
         };
