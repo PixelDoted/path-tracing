@@ -2,8 +2,8 @@ mod common;
 
 use bevy::{
     core_pipeline::{
-        bloom::BloomSettings,
-        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        bloom::Bloom,
+        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
     },
     prelude::*,
 };
@@ -34,28 +34,27 @@ fn setup(
         ..default()
     });
     commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
-                ..default()
-            },
-            transform: Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3d::default(),
+        Camera {
+            hdr: true,
+            clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
             ..default()
         },
+        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         FlyCam {
             speed: 6.0,
             sensitivity: 0.1,
             ..default()
         },
-        BloomSettings::default(),
+        Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::BLACK.into(),
         },
-        TemporalAntiAliasBundle::default(),
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
     ));
 
     let white = materials.add(StandardMaterial {
@@ -77,47 +76,40 @@ fn setup(
     });
 
     commands.spawn_batch([
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(1.1))),
-            material: white.clone(),
-            transform: Transform::from_xyz(0.0, -1.0, 0.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::NEG_Y, Vec2::splat(1.1))),
-            material: white.clone(),
-            transform: Transform::from_xyz(0.0, 1.0, 0.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(1.1))),
-            material: white.clone(),
-            transform: Transform::from_xyz(0.0, 0.0, -1.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::NEG_Z, Vec2::splat(1.1))),
-            material: white.clone(),
-            transform: Transform::from_xyz(0.0, 0.0, 1.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::X, Vec2::splat(1.1))),
-            material: red.clone(),
-            transform: Transform::from_xyz(-1.0, 0.0, 0.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::NEG_X, Vec2::splat(1.1))),
-            material: green.clone(),
-            transform: Transform::from_xyz(1.0, 0.0, 0.0),
-            ..default()
-        },
-        PbrBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::NEG_Y, Vec2::splat(0.25))),
-            material: light.clone(),
-            transform: Transform::from_xyz(0.0, 0.95, 0.0),
-            ..default()
-        },
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(1.1)))),
+            MeshMaterial3d(white.clone()),
+            Transform::from_xyz(0.0, -1.0, 0.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::NEG_Y, Vec2::splat(1.1)))),
+            MeshMaterial3d(white.clone()),
+            Transform::from_xyz(0.0, 1.0, 0.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(1.1)))),
+            MeshMaterial3d(white.clone()),
+            Transform::from_xyz(0.0, 0.0, -1.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::NEG_Z, Vec2::splat(1.1)))),
+            MeshMaterial3d(white.clone()),
+            Transform::from_xyz(0.0, 0.0, 1.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::X, Vec2::splat(1.1)))),
+            MeshMaterial3d(red.clone()),
+            Transform::from_xyz(-1.0, 0.0, 0.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::NEG_X, Vec2::splat(1.1)))),
+            MeshMaterial3d(green.clone()),
+            Transform::from_xyz(1.0, 0.0, 0.0),
+        ),
+        (
+            Mesh3d(meshes.add(Plane3d::new(Vec3::NEG_Y, Vec2::splat(0.25)))),
+            MeshMaterial3d(light.clone()),
+            Transform::from_xyz(0.0, 0.95, 0.0),
+        ),
     ]);
 }

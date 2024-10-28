@@ -2,8 +2,8 @@ mod common;
 
 use bevy::{
     core_pipeline::{
-        bloom::BloomSettings,
-        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        bloom::Bloom,
+        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
     },
     prelude::*,
 };
@@ -31,41 +31,39 @@ fn setup(
     let (samples, bounces) = common::get_settings();
 
     commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
-                // is_active: false,
-                ..default()
-            },
-            transform: Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3d::default(),
+        Camera {
+            hdr: true,
+            clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
+            // is_active: false,
             ..default()
         },
+        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         FlyCam {
             speed: 6.0,
             sensitivity: 0.1,
             ..default()
         },
-        BloomSettings::default(),
+        Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::linear_rgb(0.5, 0.5, 0.5).into(),
         },
-        TemporalAntiAliasBundle::default(),
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
     ));
 
     let texture = asset_server.load("example.png");
 
-    commands.spawn((PbrBundle {
-        mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        material: materials.add(StandardMaterial {
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::linear_rgb(1.0, 1.0, 1.0),
             base_color_texture: Some(texture),
             ..default()
-        }),
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        ..default()
-    },));
+        })),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
 }

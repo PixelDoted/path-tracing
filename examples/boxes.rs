@@ -2,8 +2,8 @@ mod common;
 
 use bevy::{
     core_pipeline::{
-        bloom::BloomSettings,
-        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        bloom::Bloom,
+        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
     },
     prelude::*,
 };
@@ -31,117 +31,102 @@ fn setup(
     let (samples, bounces) = common::get_settings();
 
     commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
-                // is_active: false,
-                ..default()
-            },
-            transform: Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3d::default(),
+        Camera {
+            hdr: true,
+            clear_color: ClearColorConfig::Custom(Color::linear_rgb(0.1, 0.2, 0.4)),
+            // is_active: false,
             ..default()
         },
+        Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         FlyCam {
             speed: 6.0,
             sensitivity: 0.1,
             ..default()
         },
-        BloomSettings::default(),
+        Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::linear_rgb(0.1, 0.2, 0.4).into(),
         },
-        TemporalAntiAliasBundle::default(),
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
     ));
 
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
     commands.spawn((
-        PbrBundle {
-            mesh: cube.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::linear_rgb(0.0, 0.0, 1.0),
-                perceptual_roughness: 0.5,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, 1.5),
+        Mesh3d(cube.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::linear_rgb(0.0, 0.0, 1.0),
+            perceptual_roughness: 0.5,
             ..default()
-        },
+        })),
+        Transform::from_xyz(0.0, 0.0, 1.5),
         SinWave(Vec3::Y * 1.0),
     ));
 
     commands.spawn((
-        PbrBundle {
-            mesh: cube.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::linear_rgb(1.0, 0.0, 0.0),
-                perceptual_roughness: 1.0,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, -1.5),
+        Mesh3d(cube.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::linear_rgb(1.0, 0.0, 0.0),
+            perceptual_roughness: 1.0,
             ..default()
-        },
+        })),
+        Transform::from_xyz(0.0, 0.0, -1.5),
         SinWave(Vec3::Y * -1.0),
     ));
 
     commands.spawn((
-        PbrBundle {
-            mesh: cube.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::linear_rgb(0.0, 0.0, 0.0),
-                emissive: Color::linear_rgb(2.0, 2.0, 2.0).into(),
-                ..default()
-            }),
-            transform: Transform::from_xyz(1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 0.5, 2.0)),
+        Mesh3d(cube.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::linear_rgb(0.0, 0.0, 0.0),
+            emissive: Color::linear_rgb(2.0, 2.0, 2.0).into(),
             ..default()
-        },
+        })),
+        Transform::from_xyz(1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 0.5, 2.0)),
         SinWave(Vec3::Y * -0.6),
     ));
 
     commands.spawn((
-        PbrBundle {
-            mesh: cube.clone(),
-            material: materials.add(StandardMaterial {
-                base_color: Color::linear_rgb(0.0, 0.0, 0.0),
-                emissive: Color::linear_rgb(2.0, 1.7, 0.0).into(),
-                ..default()
-            }),
-            transform: Transform::from_xyz(-1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 2.0, 0.5)),
+        Mesh3d(cube.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::linear_rgb(0.0, 0.0, 0.0),
+            emissive: Color::linear_rgb(2.0, 1.7, 0.0).into(),
             ..default()
-        },
+        })),
+        Transform::from_xyz(-1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 2.0, 0.5)),
         SinWave(Vec3::Z * 0.6),
     ));
 
-    commands.spawn((PbrBundle {
-        mesh: cube.clone(),
-        material: materials.add(StandardMaterial {
+    commands.spawn((
+        Mesh3d(cube.clone()),
+        MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::linear_rgb(0.0, 1.0, 0.0),
             perceptual_roughness: 0.0,
             metallic: 0.1,
             ..default()
-        }),
-        transform: Transform::from_scale(Vec3::new(0.5, 0.5, 0.5)).with_rotation(Quat::from_euler(
+        })),
+        Transform::from_scale(Vec3::new(0.5, 0.5, 0.5)).with_rotation(Quat::from_euler(
             EulerRot::XYZ,
             45f32.to_radians(),
             45f32.to_radians(),
             0.0,
         )),
-        ..default()
-    },));
+    ));
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(5.0))),
-        material: materials.add(StandardMaterial {
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(5.0)))),
+        MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::linear_rgb(0.4, 0.4, 0.4),
             perceptual_roughness: 0.1,
             metallic: 1.0,
             ..default()
-        }),
-        transform: Transform::from_xyz(0.0, -2.0, 0.0),
-        ..default()
-    });
+        })),
+        Transform::from_xyz(0.0, -2.0, 0.0),
+    ));
 }
 
 #[derive(Component)]
@@ -150,7 +135,7 @@ pub struct SinWave(pub Vec3);
 fn sinwave(time: Res<Time>, mut query: Query<(&SinWave, &Origin, &mut Transform)>) {
     for (sinwave, origin, mut transform) in query.iter_mut() {
         transform.translation =
-            origin.0 + (time.elapsed_seconds() * sinwave.0.length()).sin() * sinwave.0.normalize();
+            origin.0 + (time.elapsed_secs() * sinwave.0.length()).sin() * sinwave.0.normalize();
     }
 }
 

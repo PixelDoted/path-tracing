@@ -160,7 +160,7 @@ pub fn extract_visible(
     render_queue: Extract<Res<RenderQueue>>,
 
     material_assets: Extract<Res<Assets<StandardMaterial>>>,
-    query: Extract<Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>>,
+    query: Extract<Query<(&GlobalTransform, &Mesh3d, &MeshMaterial3d<StandardMaterial>)>>,
     mut raytrace_meta: ResMut<RayTraceMeta>,
 ) {
     let mut objects = Vec::new();

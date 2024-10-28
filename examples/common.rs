@@ -68,7 +68,7 @@ fn update(
             let right = transform.right() * x as f32;
             let up = transform.up() * y as f32;
             let forward = transform.forward() * z as f32;
-            transform.translation += (right + up + forward) * flycam.speed * time.delta_seconds();
+            transform.translation += (right + up + forward) * flycam.speed * time.delta_secs();
         }
     }
 
@@ -76,13 +76,13 @@ fn update(
         return;
     };
     if grab_cursor {
-        if window.cursor.visible {
-            window.cursor.visible = false;
-            window.cursor.grab_mode = CursorGrabMode::Locked;
+        if window.cursor_options.visible {
+            window.cursor_options.visible = false;
+            window.cursor_options.grab_mode = CursorGrabMode::Locked;
         }
-    } else if !window.cursor.visible {
-        window.cursor.visible = true;
-        window.cursor.grab_mode = CursorGrabMode::None;
+    } else if !window.cursor_options.visible {
+        window.cursor_options.visible = true;
+        window.cursor_options.grab_mode = CursorGrabMode::None;
     }
 }
 

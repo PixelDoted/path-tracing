@@ -2,8 +2,8 @@ mod common;
 
 use bevy::{
     core_pipeline::{
-        bloom::BloomSettings,
-        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        bloom::Bloom,
+        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
     },
     prelude::*,
 };
@@ -26,31 +26,30 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let (samples, bounces) = common::get_settings();
 
     commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                clear_color: ClearColorConfig::Custom(Color::BLACK),
-                // is_active: false,
-                ..default()
-            },
-            transform: Transform::from_xyz(0.0, 0.0, 7.0),
+        Camera3d::default(),
+        Camera {
+            hdr: true,
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            // is_active: false,
             ..default()
         },
+        Transform::from_xyz(0.0, 0.0, 7.0),
         FlyCam {
             speed: 6.0,
             sensitivity: 0.1,
             ..default()
         },
-        BloomSettings::default(),
+        Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::BLACK.into(),
         },
-        TemporalAntiAliasBundle::default(),
+        TemporalAntiAliasing::default(),
+        Msaa::Off,
     ));
 
     let scene = asset_server.load::<Scene>("scene.glb#Scene0");
-    commands.spawn(SceneBundle { scene, ..default() });
+    commands.spawn(SceneRoot(scene));
 }
