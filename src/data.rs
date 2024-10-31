@@ -57,7 +57,7 @@ pub struct TextureData {
 }
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
-pub struct Mesh {
+pub struct GpuMesh {
     pub aabb_min: Vec3,
     pub aabb_max: Vec3,
 
@@ -67,7 +67,7 @@ pub struct Mesh {
 }
 
 #[derive(Default, Clone, Copy, ShaderType)]
-pub struct Vertex {
+pub struct GpuVertex {
     pub position: Vec3,
     pub normal: Vec3,
     pub uv: Vec2,
@@ -76,7 +76,7 @@ pub struct Vertex {
 #[derive(Default)]
 pub struct MeshData {
     pub indices: Vec<u32>,
-    pub vertices: Vec<Vertex>,
+    pub vertices: Vec<GpuVertex>,
 }
 
 #[derive(Resource)]
@@ -85,9 +85,9 @@ pub struct RayTraceMeta {
     pub emissives: StorageBuffer<Vec<u32>>,
 
     pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
-    pub meshes: StorageBuffer<Vec<Mesh>>,
+    pub meshes: StorageBuffer<Vec<GpuMesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
-    pub vertices: StorageBuffer<Vec<Vertex>>,
+    pub vertices: StorageBuffer<Vec<GpuVertex>>,
 
     pub handle_to_material: HashMap<UntypedAssetId, usize>,
     pub handle_to_texture: HashMap<UntypedAssetId, usize>,
@@ -97,7 +97,7 @@ pub struct RayTraceMeta {
 }
 
 impl MeshData {
-    pub fn append_mesh(&mut self, mesh: &BevyMesh) -> Mesh {
+    pub fn append_mesh(&mut self, mesh: &BevyMesh) -> GpuMesh {
         let indices = mesh.indices().expect("Mesh has no indices");
         let positions = mesh
             .attribute(BevyMesh::ATTRIBUTE_POSITION)
@@ -109,7 +109,7 @@ impl MeshData {
             .attribute(BevyMesh::ATTRIBUTE_UV_0)
             .expect("Mesh has no uvs");
 
-        let mut mesh = Mesh {
+        let mut mesh = GpuMesh {
             aabb_min: Vec3::INFINITY,
             aabb_max: Vec3::NEG_INFINITY,
             ihead: self.indices.len() as u32,
@@ -142,7 +142,7 @@ impl MeshData {
             mesh.aabb_max.y = mesh.aabb_max.y.max(position[1]);
             mesh.aabb_max.z = mesh.aabb_max.z.max(position[2]);
 
-            self.vertices.push(Vertex {
+            self.vertices.push(GpuVertex {
                 position: Vec3::from_array(*position),
                 normal: Vec3::from_array(normal),
                 uv: Vec2::from_array(uv),

@@ -24,7 +24,7 @@ use bevy::{
 };
 
 use crate::{
-    data::{self, RayTraceMeta, RayTraceSettings, Texture, Vertex},
+    data::{self, GpuMesh, GpuVertex, RayTraceMeta, RayTraceSettings, Texture},
     extract,
 };
 
@@ -252,7 +252,7 @@ impl FromWorld for RayTracePipeline {
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: Some(Vec::<data::Mesh>::min_size()),
+                        min_binding_size: Some(Vec::<GpuMesh>::min_size()),
                     },
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
@@ -262,7 +262,7 @@ impl FromWorld for RayTracePipeline {
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: Some(Vec::<Vertex>::min_size()),
+                        min_binding_size: Some(Vec::<GpuVertex>::min_size()),
                     },
                 ),
             ),
