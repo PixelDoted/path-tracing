@@ -6,13 +6,14 @@
 #import bevy_pbr::lighting;
 #import bevy_pbr::pbr_functions;
 
-#import path_tracing::math::{EPSILON, U32_MAX}
+#import path_tracing::math::{EPSILON, U32_MAX, T_MIN}
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var<uniform> settings: Settings;
 
-#import path_tracing::query::{Ray, HitRecord, hit_record, hit_all, objects};
+@group(1) @binding(0) var acc_struct: acceleration_structure;
+#import path_tracing::query::{Ray, HitRecord, hit_record};//, hit_all, objects};
 
 @group(3) @binding(0) var<storage> materials: array<Material>;
 @group(3) @binding(1) var<storage> textures: array<Texture>;
@@ -222,6 +223,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
         // Perspective
         ray.pos = view.world_position;
+        // TODO: world_from_clip
         ray.dir = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -1.0, 0.0)).xyz;
         
         // Tracing
@@ -231,35 +233,41 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         for (var bounce = 0u; bounce < settings.bounces; bounce++) {
             hit_record.t = 1000.0;
 
-            let hit = hit_all(ray);
-            if hit != U32_MAX {
-                let object = objects[hit];
-                let material = materials[object.mat];
-                let prev_ray_dir = ray.dir;
+            var rq: ray_query;
+            rayQueryInitialize(&rq, acc_struct, RayDesc(0u, 0xFFu, T_MIN, hit_record.t, ray.pos, ray.dir));
+            rayQueryProceed(&rq);
 
-                // Emissive
-                var emissive = material.emissive;
-                if material.emissive_texture != U32_MAX {
-                    emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
-                }
+            let intersection = rayQueryGetCommittedIntersection(&rq);
+            if intersection.kind != RAY_QUERY_INTERSECTION_NONE {
+                let bary_w = 1.0 - intersection.barycentrics.x - intersection.barycentrics.y;
+                return vec4<f32>(intersection.barycentrics, bary_w, 1.0);
+                // let object = objects[hit];
+                // let material = materials[object.mat];
+                // let prev_ray_dir = ray.dir;
+
+                // // Emissive
+                // var emissive = material.emissive;
+                // if material.emissive_texture != U32_MAX {
+                //     emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
+                // }
                 
-                color += ray_color * emissive;
-                if dot(material.albedo, material.albedo) < EPSILON {
-                    // Skip Scatter, BRDF and RayColor
-                    break;
-                }
+                // color += ray_color * emissive;
+                // if dot(material.albedo, material.albedo) < EPSILON {
+                //     // Skip Scatter, BRDF and RayColor
+                //     break;
+                // }
 
-                // Normal
-                if material.normal_map_texture != U32_MAX {
-                    hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
-                }
+                // // Normal
+                // if material.normal_map_texture != U32_MAX {
+                //     hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
+                // }
 
-                // Scatter
-                let brdf = calculate_brdf(ray, material);
-                ray.dir = brdf.ray_dir;
-                ray.pos = hit_record.p + ray.dir * 0.000001;
+                // // Scatter
+                // let brdf = calculate_brdf(ray, material);
+                // ray.dir = brdf.ray_dir;
+                // ray.pos = hit_record.p + ray.dir * 0.000001;
 
-                ray_color *= brdf.color;
+                // ray_color *= brdf.color;
             } else {
                 color += ray_color * settings.sky_color;
                 break;
