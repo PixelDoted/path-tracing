@@ -1,40 +1,137 @@
-use crate::data::{self, MeshData, RayTraceMeta, TextureData};
+use crate::data::{self, CpuMesh, GpuMesh, RayTraceMeta, TextureData};
 use bevy::{
     prelude::*,
     render::{
+        mesh::VertexAttributeValues,
         renderer::{RenderDevice, RenderQueue},
         Extract,
     },
+    utils::HashMap,
 };
 
+#[derive(Resource)]
+pub struct ProcessedMeshes {
+    pub meshes: Vec<CpuMesh>,
+    pub asset_to_index: HashMap<AssetId<Mesh>, usize>,
+    pub changed: bool,
+}
+
 pub fn extract_meshes(
-    render_device: Extract<Res<RenderDevice>>,
-    render_queue: Extract<Res<RenderQueue>>,
     mesh_assets: Extract<Res<Assets<Mesh>>>,
-    mut raytrace_meta: ResMut<RayTraceMeta>,
-    mut mesh_count: Local<usize>,
+    mut asset_events: Extract<EventReader<AssetEvent<Mesh>>>,
+    mut processed_meshes: ResMut<ProcessedMeshes>,
 ) {
-    if mesh_assets.len() == *mesh_count {
+    let mut remove = Vec::new();
+    let mut extract = Vec::new();
+
+    for event in asset_events.read() {
+        match event {
+            AssetEvent::Added { id }
+            | AssetEvent::Modified { id }
+            | AssetEvent::LoadedWithDependencies { id } => {
+                extract.push(*id);
+            }
+            AssetEvent::Removed { id } | AssetEvent::Unused { id } => {
+                remove.push(*id);
+            }
+        }
+
+        processed_meshes.changed = true;
+    }
+
+    for id in remove {
+        let index = processed_meshes.asset_to_index.remove(&id).unwrap();
+        processed_meshes.meshes.remove(index);
+
+        for ati in processed_meshes.asset_to_index.values_mut() {
+            if *ati < index {
+                continue;
+            }
+
+            *ati -= 1;
+        }
+    }
+
+    for id in extract {
+        let mesh = mesh_assets.get(id).unwrap();
+        let mut cpu = CpuMesh {
+            aabb_min: Vec3::INFINITY,
+            aabb_max: Vec3::NEG_INFINITY,
+            indices: Vec::new(),
+            vertices: Vec::new(),
+        };
+
+        let (
+            Some(VertexAttributeValues::Float32x3(positions)),
+            Some(VertexAttributeValues::Float32x3(normals)),
+            Some(VertexAttributeValues::Float32x2(uvs)),
+        ) = (
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION),
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL),
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0),
+        )
+        else {
+            continue;
+        };
+
+        for ((position, normal), uv) in positions.iter().zip(normals).zip(uvs) {
+            let position = Vec3::from_array(*position);
+            cpu.aabb_min = cpu.aabb_min.min(position);
+            cpu.aabb_max = cpu.aabb_max.max(position);
+
+            cpu.vertices.push(data::GpuVertex {
+                position,
+                normal: Vec3::from_array(*normal),
+                uv: Vec2::from_array(*uv),
+            });
+        }
+
+        cpu.indices = match mesh.indices().unwrap() {
+            bevy::render::mesh::Indices::U16(vec) => {
+                vec.iter().cloned().map(|v| v as u32).collect()
+            }
+            bevy::render::mesh::Indices::U32(vec) => vec.clone(),
+        };
+
+        let index = processed_meshes.meshes.len();
+        processed_meshes.meshes.push(cpu);
+        processed_meshes.asset_to_index.insert(id, index);
+    }
+}
+
+pub fn prepare_meshes(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut processed_meshes: ResMut<ProcessedMeshes>,
+    mut raytrace_meta: ResMut<RayTraceMeta>,
+) {
+    if !processed_meshes.changed {
         return;
     }
+    processed_meshes.changed = false;
 
-    raytrace_meta.handle_to_mesh.clear();
-    *mesh_count = mesh_assets.len();
+    let mut meshes = Vec::with_capacity(processed_meshes.meshes.len());
+    let mut indices = Vec::new();
+    let mut vertices = Vec::new();
 
-    let mut meshes = Vec::new();
-    let mut mesh_data = MeshData::default();
+    for mesh in &processed_meshes.meshes {
+        let gpu_mesh = GpuMesh {
+            aabb_min: mesh.aabb_min,
+            aabb_max: mesh.aabb_max,
+            ihead: indices.len() as u32,
+            vhead: vertices.len() as u32,
+            tri_count: (mesh.indices.len() / 3) as u32,
+        };
 
-    for (id, mesh) in mesh_assets.iter() {
-        raytrace_meta
-            .handle_to_mesh
-            .insert(id.untyped(), meshes.len());
-        meshes.push(mesh_data.append_mesh(mesh));
+        indices.extend_from_slice(&mesh.indices);
+        vertices.extend_from_slice(&mesh.vertices);
+        meshes.push(gpu_mesh);
     }
 
-    // Mesh Meta
+    // Write
     *(raytrace_meta.meshes.get_mut()) = meshes;
-    *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
-    *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+    *(raytrace_meta.indices.get_mut()) = indices;
+    *(raytrace_meta.vertices.get_mut()) = vertices;
 
     raytrace_meta
         .meshes
@@ -48,6 +145,48 @@ pub fn extract_meshes(
 
     debug!("Wrote meshes to gpu buffer");
 }
+
+// pub fn extract_meshes(
+//     render_device: Extract<Res<RenderDevice>>,
+//     render_queue: Extract<Res<RenderQueue>>,
+//     mesh_assets: Extract<Res<Assets<Mesh>>>,
+//     mut raytrace_meta: ResMut<RayTraceMeta>,
+//     mut mesh_count: Local<usize>,
+// ) {
+//     if mesh_assets.len() == *mesh_count {
+//         return;
+//     }
+
+//     raytrace_meta.handle_to_mesh.clear();
+//     *mesh_count = mesh_assets.len();
+
+//     let mut meshes = Vec::new();
+//     let mut mesh_data = MeshData::default();
+
+//     for (id, mesh) in mesh_assets.iter() {
+//         raytrace_meta
+//             .handle_to_mesh
+//             .insert(id.untyped(), meshes.len());
+//         meshes.push(mesh_data.append_mesh(mesh));
+//     }
+
+//     // Mesh Meta
+//     *(raytrace_meta.meshes.get_mut()) = meshes;
+//     *(raytrace_meta.indices.get_mut()) = mesh_data.indices;
+//     *(raytrace_meta.vertices.get_mut()) = mesh_data.vertices;
+
+//     raytrace_meta
+//         .meshes
+//         .write_buffer(&render_device, &render_queue);
+//     raytrace_meta
+//         .indices
+//         .write_buffer(&render_device, &render_queue);
+//     raytrace_meta
+//         .vertices
+//         .write_buffer(&render_device, &render_queue);
+
+//     debug!("Wrote meshes to gpu buffer");
+// }
 
 pub fn extract_materials(
     render_device: Extract<Res<RenderDevice>>,
@@ -161,6 +300,7 @@ pub fn extract_visible(
 
     material_assets: Extract<Res<Assets<StandardMaterial>>>,
     query: Extract<Query<(&GlobalTransform, &Mesh3d, &MeshMaterial3d<StandardMaterial>)>>,
+    processed_meshes: Res<ProcessedMeshes>,
     mut raytrace_meta: ResMut<RayTraceMeta>,
 ) {
     let mut objects = Vec::new();
@@ -173,19 +313,23 @@ pub fn extract_visible(
             }
         }
 
+        let Some(&mesh) = processed_meshes.asset_to_index.get(&mesh_handle.id()) else {
+            continue;
+        };
+        let Some(&mat) = raytrace_meta
+            .handle_to_material
+            .get(&mat_handle.id().untyped())
+        else {
+            continue;
+        };
+
         let local_to_world = transform.compute_matrix();
         objects.push(data::Object {
             world_to_local: local_to_world.inverse(),
             local_to_world,
 
-            mat: *raytrace_meta
-                .handle_to_material
-                .get(&mat_handle.id().untyped())
-                .unwrap() as u32,
-            mesh: *raytrace_meta
-                .handle_to_mesh
-                .get(&mesh_handle.id().untyped())
-                .unwrap() as u32,
+            mat: mat as u32,
+            mesh: mesh as u32,
         });
     }
 

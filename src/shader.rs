@@ -18,7 +18,7 @@ use bevy::{
         },
         renderer::RenderDevice,
         view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
-        RenderApp,
+        Render, RenderApp, RenderSet,
     },
     utils::HashMap,
 };
@@ -53,7 +53,6 @@ impl Plugin for RayTracePlugin {
             objects: StorageBuffer::default(),
             emissives: StorageBuffer::default(),
 
-            handle_to_mesh: HashMap::new(),
             meshes: StorageBuffer::default(),
             indices: StorageBuffer::default(),
             vertices: StorageBuffer::default(),
@@ -65,23 +64,34 @@ impl Plugin for RayTracePlugin {
             texture_data: StorageBuffer::default(),
         });
 
-        render_app.add_systems(
-            ExtractSchedule,
-            (
+        render_app
+            .add_systems(
+                ExtractSchedule,
                 (
-                    extract::extract_meshes,
-                    (extract::extract_textures, extract::extract_materials).chain(),
-                ),
-                extract::extract_visible,
+                    (
+                        extract::extract_meshes,
+                        (extract::extract_textures, extract::extract_materials).chain(),
+                    ),
+                    extract::extract_visible,
+                )
+                    .chain(),
             )
-                .chain(),
-        );
+            .add_systems(
+                Render,
+                extract::prepare_meshes.in_set(RenderSet::QueueMeshes),
+            );
         render_app
             .add_render_graph_node::<ViewNodeRunner<RayTraceNode>>(Core3d, RayTraceLabel)
             .add_render_graph_edges(
                 Core3d,
                 (Node3d::EndMainPass, RayTraceLabel, Node3d::MotionBlur),
             );
+
+        render_app.insert_resource(extract::ProcessedMeshes {
+            meshes: Vec::new(),
+            asset_to_index: HashMap::new(),
+            changed: false,
+        });
     }
 
     fn finish(&self, app: &mut App) {

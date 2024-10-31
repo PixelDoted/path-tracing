@@ -73,8 +73,10 @@ pub struct GpuVertex {
     pub uv: Vec2,
 }
 
-#[derive(Default)]
-pub struct MeshData {
+pub struct CpuMesh {
+    pub aabb_min: Vec3,
+    pub aabb_max: Vec3,
+
     pub indices: Vec<u32>,
     pub vertices: Vec<GpuVertex>,
 }
@@ -84,7 +86,6 @@ pub struct RayTraceMeta {
     pub objects: StorageBuffer<Vec<Object>>,
     pub emissives: StorageBuffer<Vec<u32>>,
 
-    pub handle_to_mesh: HashMap<UntypedAssetId, usize>,
     pub meshes: StorageBuffer<Vec<GpuMesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<GpuVertex>>,
@@ -94,64 +95,6 @@ pub struct RayTraceMeta {
     pub materials: StorageBuffer<Vec<Material>>,
     pub textures: StorageBuffer<Vec<Texture>>,
     pub texture_data: StorageBuffer<Vec<f32>>,
-}
-
-impl MeshData {
-    pub fn append_mesh(&mut self, mesh: &BevyMesh) -> GpuMesh {
-        let indices = mesh.indices().expect("Mesh has no indices");
-        let positions = mesh
-            .attribute(BevyMesh::ATTRIBUTE_POSITION)
-            .expect("Mesh has no vertices");
-        let normals = mesh
-            .attribute(BevyMesh::ATTRIBUTE_NORMAL)
-            .expect("Mesh has no normals");
-        let uvs = mesh
-            .attribute(BevyMesh::ATTRIBUTE_UV_0)
-            .expect("Mesh has no uvs");
-
-        let mut mesh = GpuMesh {
-            aabb_min: Vec3::INFINITY,
-            aabb_max: Vec3::NEG_INFINITY,
-            ihead: self.indices.len() as u32,
-            vhead: self.vertices.len() as u32,
-            tri_count: (indices.len() / 3) as u32,
-        };
-
-        for i in indices.iter() {
-            self.indices.push(i as u32);
-        }
-
-        let mut i = 0;
-        while let Some(position) = match positions {
-            VertexAttributeValues::Float32x3(values) => values.get(i),
-            _ => None,
-        } {
-            let normal = match normals {
-                VertexAttributeValues::Float32x3(values) => values[i],
-                _ => panic!("Normal format has to be `Float32x3`"),
-            };
-            let uv = match uvs {
-                VertexAttributeValues::Float32x2(values) => values[i],
-                _ => panic!("UV format has to be `Float32x2`"),
-            };
-
-            mesh.aabb_min.x = mesh.aabb_min.x.min(position[0]);
-            mesh.aabb_min.y = mesh.aabb_min.y.min(position[1]);
-            mesh.aabb_min.z = mesh.aabb_min.z.min(position[2]);
-            mesh.aabb_max.x = mesh.aabb_max.x.max(position[0]);
-            mesh.aabb_max.y = mesh.aabb_max.y.max(position[1]);
-            mesh.aabb_max.z = mesh.aabb_max.z.max(position[2]);
-
-            self.vertices.push(GpuVertex {
-                position: Vec3::from_array(*position),
-                normal: Vec3::from_array(normal),
-                uv: Vec2::from_array(uv),
-            });
-            i += 1;
-        }
-
-        mesh
-    }
 }
 
 impl TextureData {
