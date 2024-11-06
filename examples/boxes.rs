@@ -4,6 +4,7 @@ use bevy::{
     core_pipeline::{
         bloom::Bloom,
         experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
+        tonemapping::Tonemapping,
     },
     prelude::*,
 };
@@ -38,20 +39,21 @@ fn setup(
             // is_active: false,
             ..default()
         },
+        Tonemapping::BlenderFilmic,
         Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         FlyCam {
             speed: 6.0,
             sensitivity: 0.1,
             ..default()
         },
-        Bloom::default(),
+        // Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::linear_rgb(0.1, 0.2, 0.4).into(),
         },
-        TemporalAntiAliasing::default(),
+        // TemporalAntiAliasing::default(),
         Msaa::Off,
     ));
 
@@ -65,7 +67,7 @@ fn setup(
             ..default()
         })),
         Transform::from_xyz(0.0, 0.0, 1.5),
-        SinWave(Vec3::Y * 1.0),
+        // SinWave(Vec3::Y * 1.0),
     ));
 
     commands.spawn((
@@ -76,7 +78,7 @@ fn setup(
             ..default()
         })),
         Transform::from_xyz(0.0, 0.0, -1.5),
-        SinWave(Vec3::Y * -1.0),
+        // SinWave(Vec3::Y * -1.0),
     ));
 
     commands.spawn((
@@ -87,7 +89,7 @@ fn setup(
             ..default()
         })),
         Transform::from_xyz(1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 0.5, 2.0)),
-        SinWave(Vec3::Y * -0.6),
+        // SinWave(Vec3::Y * -0.6),
     ));
 
     commands.spawn((
@@ -98,7 +100,7 @@ fn setup(
             ..default()
         })),
         Transform::from_xyz(-1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 2.0, 0.5)),
-        SinWave(Vec3::Z * 0.6),
+        // SinWave(Vec3::Z * 0.6),
     ));
 
     commands.spawn((

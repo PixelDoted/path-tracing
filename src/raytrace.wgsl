@@ -175,11 +175,11 @@ fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
     let N = hit_record.n; // Surface Normal
     let V = -ray.dir; // View Vector (Outgoing Light)
     let L = new_ray_dir; // Incoming Light
-    let R = normalize(reflect(-L, N)); // reflection vector
+    let R = reflect(-L, N); // reflection vector
 
     // Dot Products
     let NdotL = dot(N, L);
-    let NdotV = dot(N, V);
+    let NdotV = max(dot(N, V), 0.0001);
 
     // Create Lighting Input
     var lighting_input: lighting::LightingInput;
@@ -196,11 +196,11 @@ fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
 
     var derived_lighting_input = lighting::derive_lighting_input(N, V, L);
 
-    let specular = lighting::specular(&lighting_input, &derived_lighting_input, material.reflectance);
-    let color = albedo * lighting::Fd_Burley(&lighting_input, &derived_lighting_input) + specular;
+    // let specular = lighting::specular(&lighting_input, &derived_lighting_input, material.reflectance);
+    let color = albedo * lighting::Fd_Burley(&lighting_input, &derived_lighting_input);
 
     // Output
-    return BRDFOutput(new_ray_dir, color);
+    return BRDFOutput(new_ray_dir, color * PI);
 }
 
 // ---- Entry ----
@@ -210,19 +210,15 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // Setup
     let uv = (in.uv - 0.5) * view.viewport.zw / view.viewport.w * vec2<f32>(1.0, -1.0);
     rng_setup(in.uv * view.viewport.zw * (globals.time + 1.0));
-    var ray = Ray();
+    
+    let initial_origin = view.world_position;
+    let initial_direction = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -1.0, 0.0)).xyz;
     
     // Sample
     var pixel_color = vec3<f32>(0.0);
     for (var sample = 0u; sample < settings.samples; sample++) {
         // Setup
-        // Orthographic
-        // ray.pos = view.world_position + (view.world_from_view * vec4<f32>(uv * 4.0, 0.0, 0.0)).xyz;
-        // ray.dir = normalize(view.world_from_view * vec4<f32>(0.0, 0.0, -1.0, 0.0)).xyz;
-
-        // Perspective
-        ray.pos = view.world_position;
-        ray.dir = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -1.0, 0.0)).xyz;
+        var ray = Ray(initial_origin, initial_direction);
         
         // Tracing
         var ray_color = vec3<f32>(1.0);
@@ -257,7 +253,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
                 // Scatter
                 let brdf = calculate_brdf(ray, material);
                 ray.dir = brdf.ray_dir;
-                ray.pos = hit_record.p + ray.dir * 0.000001;
+                ray.pos = hit_record.p + ray.dir * 0.001;
 
                 ray_color *= brdf.color;
             } else {
@@ -269,7 +265,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             if p < EPSILON {
                 break;
             }
-            ray_color *= 1.0 / (1.0 + p);
         }
 
         pixel_color += color;
