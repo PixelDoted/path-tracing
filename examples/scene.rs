@@ -43,7 +43,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         RayTraceSettings {
             bounces,
             samples,
-            fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::BLACK.into(),
         },
         TemporalAntiAliasing::default(),

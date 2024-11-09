@@ -16,7 +16,6 @@ use bevy::{
 pub struct RayTraceSettings {
     pub bounces: u32,
     pub samples: u32,
-    pub fov: f32,
     pub sky_color: LinearRgba,
 }
 

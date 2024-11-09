@@ -48,7 +48,6 @@ fn setup(
         RayTraceSettings {
             bounces,
             samples,
-            fov: std::f32::consts::FRAC_PI_4,
             sky_color: Color::linear_rgb(0.5, 0.5, 0.5).into(),
         },
         TemporalAntiAliasing::default(),

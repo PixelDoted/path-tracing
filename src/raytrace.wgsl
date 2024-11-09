@@ -23,7 +23,6 @@
 struct Settings {
     bounces: u32,
     samples: u32,
-    fov: f32,
     sky_color: vec3<f32>,
 }
 
@@ -208,11 +207,14 @@ fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // Setup
-    let uv = (in.uv - 0.5) * view.viewport.zw / view.viewport.w * vec2<f32>(1.0, -1.0);
     rng_setup(in.uv * view.viewport.zw * (globals.time + 1.0));
     
-    let initial_origin = view.world_position;
-    let initial_direction = normalize(view.world_from_view * vec4<f32>(uv.x * settings.fov, uv.y * settings.fov, -1.0, 0.0)).xyz;
+    let d = (in.uv * 2.0 - 1.0) * vec2<f32>(1.0, -1.0);
+
+    // https://github.com/Vecvec/wgpu/blob/ray-tracing-new/examples/src/ray_cube_fragment/shader.wgsl#L60
+    let initial_origin = (view.world_from_view * vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
+    let temp = view.view_from_clip * vec4<f32>(d.x, d.y, 1.0, 1.0);
+    let initial_direction = (view.world_from_view * vec4<f32>(normalize(temp.xyz), 0.0)).xyz;
     
     // Sample
     var pixel_color = vec3<f32>(0.0);
