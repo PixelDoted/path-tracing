@@ -6,13 +6,22 @@
 #import bevy_pbr::lighting;
 #import bevy_pbr::pbr_functions;
 
-#import path_tracing::math::{EPSILON, U32_MAX, T_MIN, T_MAX}
+const EPSILON: f32 = 4.88e-4;
+const INFINITY: f32 = 10000000.0; // 10^8 
+const U32_MAX: u32 = 4294967295; // 2**32-1
+const T_MIN: f32 = 0.0001;
+const T_MAX: f32 = 1000.0;
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var<uniform> settings: Settings;
 
-#import path_tracing::query::{Ray, objects, meshes, vertices, indices};
+@group(1) @binding(0) var<storage> objects: array<Object>;
+@group(1) @binding(1) var<storage> emissives: array<u32>;
+
+@group(2) @binding(0) var<storage> meshes: array<Mesh>;
+@group(2) @binding(1) var<storage> indices: array<u32>;
+@group(2) @binding(2) var<storage> vertices: array<Vertex>;
 @group(2) @binding(3) var acc_struct: acceleration_structure;
 
 @group(3) @binding(0) var<storage> materials: array<Material>;
@@ -25,6 +34,27 @@ struct Settings {
     bounces: u32,
     samples: u32,
     sky_color: vec3<f32>,
+}
+
+struct Object {
+    local_to_world: mat4x4<f32>,
+    world_to_local: mat4x4<f32>,
+    
+    mat: u32,
+    mesh: u32,
+}
+
+struct Mesh {
+    start_index: u32,
+    start_vertex: u32,
+    end_index: u32,
+    end_vertex: u32,
+}
+
+struct Vertex {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    uv: vec2<f32>,
 }
 
 struct Material {
@@ -47,6 +77,11 @@ struct Texture {
 }
 
 // --- Runtime Data ----
+
+struct Ray {
+    pos: vec3<f32>,
+    dir: vec3<f32>,
+}
 
 struct BRDFOutput {
     ray_dir: vec3<f32>,
