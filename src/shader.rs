@@ -133,10 +133,7 @@ impl ViewNode for RayTraceNode {
         let mut build_entries = Vec::new();
         for index in &meta.blas_build_queue {
             let mesh = meta.meshes.get()[*index];
-            println!(
-                "{} {} {} {}",
-                mesh.start_vertex, mesh.vertex_count, mesh.start_index, mesh.index_count
-            );
+
             let vertex_stride = std::mem::size_of::<GpuVertex>() as u32;
             let triangle_geometry = wgpu::BlasTriangleGeometry {
                 size: &meta.blas_size_descs[*index],
@@ -155,17 +152,17 @@ impl ViewNode for RayTraceNode {
             });
         }
 
+        let meta_objects = meta.objects.get();
         let tlas = device
             .wgpu_device()
             .create_tlas(&wgpu::CreateTlasDescriptor {
                 label: Some("path_tracer_tlas"),
                 flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
                 update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-                max_instances: 8 * 8,
+                max_instances: meta_objects.len() as u32 + 4,
             });
         let mut tlas_package = wgpu::TlasPackage::new(tlas);
 
-        let meta_objects = meta.objects.get();
         for i in 0..meta_objects.len() {
             let instance = &mut tlas_package[i];
 

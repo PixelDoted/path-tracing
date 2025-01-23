@@ -64,7 +64,8 @@ fn setup(
         Msaa::Off,
     ));
 
-    let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let cube = meshes.add(Cuboid::from_length(1.0));
+    let cube_half = meshes.add(Cuboid::from_length(0.5)); // HACK: Transform scaling doesn't work
 
     commands.spawn((
         Mesh3d(cube.clone()),
@@ -111,21 +112,19 @@ fn setup(
     ));
 
     commands.spawn((
-        Mesh3d(cube.clone()),
+        Mesh3d(cube_half.clone()),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::linear_rgb(0.0, 1.0, 0.0),
             perceptual_roughness: 0.0,
             metallic: 0.1,
             ..default()
         })),
-        Transform::from_xyz(0.0, 0.0, 0.0)
-            .with_scale(Vec3::splat(0.5))
-            .with_rotation(Quat::from_euler(
-                EulerRot::XYZ,
-                45f32.to_radians(),
-                45f32.to_radians(),
-                0.0,
-            )),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_euler(
+            EulerRot::XYZ,
+            45f32.to_radians(),
+            45f32.to_radians(),
+            0.0,
+        )),
     ));
 
     commands.spawn((
