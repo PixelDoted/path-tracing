@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+
 use crate::data::{self, CpuMesh, GpuMesh, RayTraceMeta, TextureData};
 use bevy::{
     prelude::*,
     render::{
         mesh::VertexAttributeValues,
-        renderer::{RenderDevice, RenderQueue},
+        render_resource::{BufferDescriptor, BufferInitDescriptor, BufferUsages},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
         Extract,
     },
-    utils::HashMap,
 };
 
 #[derive(Resource)]
@@ -83,6 +85,7 @@ pub fn extract_meshes(
                 position,
                 normal: Vec3::from_array(*normal),
                 uv: Vec2::from_array(*uv),
+                ..Default::default()
             });
         }
 
@@ -114,18 +117,40 @@ pub fn prepare_meshes(
     let mut indices = Vec::new();
     let mut vertices = Vec::new();
 
-    for mesh in &processed_meshes.meshes {
+    for (i, mesh) in processed_meshes.meshes.iter().enumerate() {
         let gpu_mesh = GpuMesh {
-            aabb_min: mesh.aabb_min,
-            aabb_max: mesh.aabb_max,
-            ihead: indices.len() as u32,
-            vhead: vertices.len() as u32,
-            tri_count: (mesh.indices.len() / 3) as u32,
+            start_index: indices.len() as u32,
+            start_vertex: vertices.len() as u32,
+            index_count: mesh.indices.len() as u32,
+            vertex_count: mesh.vertices.len() as u32,
         };
 
         indices.extend_from_slice(&mesh.indices);
         vertices.extend_from_slice(&mesh.vertices);
+
+        let blas_geo_size_desc = wgpu::BlasTriangleGeometrySizeDescriptor {
+            vertex_format: wgpu::VertexFormat::Float32x3,
+            vertex_count: gpu_mesh.vertex_count,
+            index_format: Some(wgpu::IndexFormat::Uint32),
+            index_count: Some(gpu_mesh.index_count),
+            flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+        };
+
+        let blas = render_device.wgpu_device().create_blas(
+            &wgpu::CreateBlasDescriptor {
+                label: Some("path_tracing_blas"),
+                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+            },
+            wgpu::BlasGeometrySizeDescriptors::Triangles {
+                descriptors: vec![blas_geo_size_desc.clone()],
+            },
+        );
+
         meshes.push(gpu_mesh);
+        raytrace_meta.blas_size_descs.push(blas_geo_size_desc);
+        raytrace_meta.blases.push(blas);
+        raytrace_meta.blas_build_queue.push(i);
     }
 
     // Write

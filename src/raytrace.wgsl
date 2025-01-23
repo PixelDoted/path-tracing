@@ -6,13 +6,14 @@
 #import bevy_pbr::lighting;
 #import bevy_pbr::pbr_functions;
 
-#import path_tracing::math::{EPSILON, U32_MAX}
+#import path_tracing::math::{EPSILON, U32_MAX, T_MIN, T_MAX}
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var<uniform> settings: Settings;
 
-#import path_tracing::query::{Ray, HitRecord, hit_record, hit_all, objects};
+#import path_tracing::query::{Ray, objects, meshes, vertices, indices};
+@group(2) @binding(3) var acc_struct: acceleration_structure;
 
 @group(3) @binding(0) var<storage> materials: array<Material>;
 @group(3) @binding(1) var<storage> textures: array<Texture>;
@@ -154,24 +155,24 @@ fn sample_texture(idx: u32, u: f32, v: f32) -> vec3<f32> {
 
 // ---- BRDF ----
 
-fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
-    let lambertian_ray = normalize(hugues_moller(hit_record.n) * cosine_sample()); // Lambertian
-    let reflection_ray = normalize(reflect(ray.dir, hit_record.n)); // Reflection
+fn calculate_brdf(ray: Ray, material: Material, position: vec3<f32>, normal: vec3<f32>, uv: vec2<f32>) -> BRDFOutput {
+    let lambertian_ray = normalize(hugues_moller(normal) * cosine_sample()); // Lambertian
+    let reflection_ray = normalize(reflect(ray.dir, normal)); // Reflection
     let new_ray_dir = mix(reflection_ray, lambertian_ray, material.roughness);
 
     var albedo = material.albedo;
     var metallic = material.metallic;
     var roughness = material.roughness;
     if material.albedo_texture != U32_MAX {
-        albedo *= sample_texture(material.albedo_texture, hit_record.uv.x, hit_record.uv.y);
+        albedo *= sample_texture(material.albedo_texture, uv.x, uv.y);
     }
     if material.metallic_roughness_texture != U32_MAX {
-        let mr = sample_texture(material.metallic_roughness_texture, hit_record.uv.x, hit_record.uv.y);
+        let mr = sample_texture(material.metallic_roughness_texture, uv.x, uv.y);
     }
     
     
     // BRDF Vectors
-    let N = hit_record.n; // Surface Normal
+    let N = normal; // Surface Normal
     let V = -ray.dir; // View Vector (Outgoing Light)
     let L = new_ray_dir; // Incoming Light
     let R = reflect(-L, N); // reflection vector
@@ -187,7 +188,7 @@ fn calculate_brdf(ray: Ray, material: Material) -> BRDFOutput {
     lighting_input.layers[lighting::LAYER_BASE].R = R;
     lighting_input.layers[lighting::LAYER_BASE].perceptual_roughness = roughness;
     lighting_input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(roughness);
-    lighting_input.P = hit_record.p;
+    lighting_input.P = position;
     lighting_input.V = V;
     lighting_input.diffuse_color = albedo;
     lighting_input.F0_ = pbr_functions::calculate_F0(albedo, metallic, material.reflectance);
@@ -227,18 +228,39 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         var color = vec3<f32>(0.0);
 
         for (var bounce = 0u; bounce < settings.bounces; bounce++) {
-            hit_record.t = 1000.0;
+            var rq: ray_query;
+            rayQueryInitialize(&rq, acc_struct, RayDesc(0u, 0xFFu, T_MIN, T_MAX, ray.pos, ray.dir));
+            rayQueryProceed(&rq);
 
-            let hit = hit_all(ray);
-            if hit != U32_MAX {
-                let object = objects[hit];
+            let intersection = rayQueryGetCommittedIntersection(&rq);
+            if intersection.kind != RAY_QUERY_INTERSECTION_NONE {
+                let object = objects[intersection.instance_custom_index];
+                let mesh = meshes[object.mesh];
                 let material = materials[object.mat];
                 let prev_ray_dir = ray.dir;
+
+                // Get Hit Info
+                let i = intersection.primitive_index * 3u + mesh.start_index;
+
+                let v0 = vertices[mesh.start_vertex + indices[i]];
+                let v1 = vertices[mesh.start_vertex + indices[i + 1]];
+                let v2 = vertices[mesh.start_vertex + indices[i + 2]];
+
+                let bary = vec3<f32>(1.0 - intersection.barycentrics.x - intersection.barycentrics.y, intersection.barycentrics);
+                var position = v0.position * bary.x + v1.position * bary.y + v2.position * bary.z;
+                var normal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
+                var uv = v0.uv * bary.x + v1.uv * bary.y + v2.uv * bary.z;
+
+                position = (object.local_to_world * vec4<f32>(position, 1.0)).xyz;
+                normal = (object.local_to_world * vec4<f32>(normal, 0.0)).xyz;
+                if !intersection.front_face {
+                    normal = -normal;
+                }
 
                 // Emissive
                 var emissive = material.emissive;
                 if material.emissive_texture != U32_MAX {
-                    emissive = sample_texture(material.emissive_texture, hit_record.uv.x, hit_record.uv.y);
+                    emissive = sample_texture(material.emissive_texture, uv.x, uv.y);
                 }
                 
                 color += ray_color * emissive;
@@ -249,13 +271,13 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
                 // Normal
                 if material.normal_map_texture != U32_MAX {
-                    hit_record.n *= sample_texture(material.normal_map_texture, hit_record.uv.x, hit_record.uv.y);
+                    normal *= sample_texture(material.normal_map_texture, uv.x, uv.y);
                 }
 
                 // Scatter
-                let brdf = calculate_brdf(ray, material);
+                let brdf = calculate_brdf(ray, material, position, normal, uv);
                 ray.dir = brdf.ray_dir;
-                ray.pos = hit_record.p + ray.dir * 0.001;
+                ray.pos = position + ray.dir * 0.001;
 
                 ray_color *= brdf.color;
             } else {

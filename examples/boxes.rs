@@ -1,12 +1,12 @@
 mod common;
 
 use bevy::{
-    core_pipeline::{
-        bloom::Bloom,
-        experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
-        tonemapping::Tonemapping,
-    },
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     prelude::*,
+    render::{
+        settings::{RenderCreation, WgpuFeatures, WgpuSettings},
+        RenderPlugin,
+    },
 };
 use common::{FlyCam, FlyCamPlugin};
 use path_tracing::{RayTracePlugin, RayTraceSettings};
@@ -14,10 +14,19 @@ use path_tracing::{RayTracePlugin, RayTraceSettings};
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins.set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    features: WgpuFeatures::EXPERIMENTAL_RAY_QUERY
+                        | WgpuFeatures::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE,
+                    limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    backends: Some(wgpu::Backends::VULKAN),
+
+                    ..default()
+                }),
+                ..default()
+            }),
             RayTracePlugin,
             FlyCamPlugin,
-            TemporalAntiAliasPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, (get_origin, sinwave))
@@ -46,13 +55,12 @@ fn setup(
             sensitivity: 0.1,
             ..default()
         },
-        // Bloom::default(),
+        Bloom::default(),
         RayTraceSettings {
             bounces,
             samples,
             sky_color: Color::linear_rgb(0.1, 0.2, 0.4).into(),
         },
-        // TemporalAntiAliasing::default(),
         Msaa::Off,
     ));
 
@@ -84,7 +92,7 @@ fn setup(
         Mesh3d(cube.clone()),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::linear_rgb(0.0, 0.0, 0.0),
-            emissive: Color::linear_rgb(2.0, 2.0, 2.0).into(),
+            emissive: Color::linear_rgb(2.0, 0.0, 2.0).into(),
             ..default()
         })),
         Transform::from_xyz(1.5, 0.0, 0.0).with_scale(Vec3::new(0.5, 0.5, 2.0)),
@@ -110,12 +118,14 @@ fn setup(
             metallic: 0.1,
             ..default()
         })),
-        Transform::from_scale(Vec3::new(0.5, 0.5, 0.5)).with_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            45f32.to_radians(),
-            45f32.to_radians(),
-            0.0,
-        )),
+        Transform::from_xyz(0.0, 0.0, 0.0)
+            .with_scale(Vec3::splat(0.5))
+            .with_rotation(Quat::from_euler(
+                EulerRot::XYZ,
+                45f32.to_radians(),
+                45f32.to_radians(),
+                0.0,
+            )),
     ));
 
     commands.spawn((

@@ -1,15 +1,16 @@
+use std::collections::HashMap;
+
 use bevy::{
     asset::UntypedAssetId,
     color::LinearRgba,
     ecs::{component::Component, system::Resource},
-    math::{Mat4, Vec2, Vec3},
+    math::{Mat4, Vec2, Vec3, Vec4},
     prelude::{Image, Mesh as BevyMesh},
     render::{
         extract_component::ExtractComponent,
         mesh::VertexAttributeValues,
-        render_resource::{ShaderType, StorageBuffer},
+        render_resource::{Buffer, ShaderType, StorageBuffer},
     },
-    utils::HashMap,
 };
 
 #[derive(Component, Default, Clone, Copy, ExtractComponent, ShaderType)]
@@ -57,19 +58,34 @@ pub struct TextureData {
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct GpuMesh {
-    pub aabb_min: Vec3,
-    pub aabb_max: Vec3,
-
-    pub ihead: u32,
-    pub vhead: u32,
-    pub tri_count: u32,
+    pub start_index: u32,
+    pub start_vertex: u32,
+    pub index_count: u32,
+    pub vertex_count: u32,
 }
 
-#[derive(Default, Clone, Copy, ShaderType)]
+#[derive(Clone, Copy, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct GpuVertex {
     pub position: Vec3,
+    pub _p0: f32,
     pub normal: Vec3,
+    pub _p1: f32,
     pub uv: Vec2,
+    pub _p2: [f32; 2],
+}
+
+impl Default for GpuVertex {
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            _p0: 0f32,
+            normal: Vec3::ZERO,
+            _p1: 0f32,
+            uv: Vec2::ZERO,
+            _p2: [0f32; 2],
+        }
+    }
 }
 
 pub struct CpuMesh {
@@ -88,6 +104,11 @@ pub struct RayTraceMeta {
     pub meshes: StorageBuffer<Vec<GpuMesh>>,
     pub indices: StorageBuffer<Vec<u32>>,
     pub vertices: StorageBuffer<Vec<GpuVertex>>,
+
+    pub blas_size_descs: Vec<wgpu::BlasTriangleGeometrySizeDescriptor>,
+    pub blases: Vec<wgpu::Blas>,
+    pub tlas_package: Option<wgpu::TlasPackage>,
+    pub blas_build_queue: Vec<usize>,
 
     pub handle_to_material: HashMap<UntypedAssetId, usize>,
     pub handle_to_texture: HashMap<UntypedAssetId, usize>,

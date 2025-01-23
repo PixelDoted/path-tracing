@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::{
     asset::load_internal_asset,
     core_pipeline::{
@@ -14,13 +16,12 @@ use bevy::{
             BindGroupLayoutEntries, BindingType, BufferBindingType, CachedRenderPipelineId,
             ColorTargetState, ColorWrites, FragmentState, MultisampleState, Operations,
             PipelineCache, PrimitiveState, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, ShaderStages, ShaderType, StorageBuffer, TextureFormat,
+            RenderPipelineDescriptor, ShaderStages, ShaderType, StorageBuffer,
         },
-        renderer::RenderDevice,
+        renderer::{RenderDevice, RenderQueue},
         view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
         Render, RenderApp, RenderSet,
     },
-    utils::HashMap,
 };
 
 use crate::{
@@ -49,7 +50,7 @@ impl Plugin for RayTracePlugin {
             return;
         };
 
-        render_app.insert_resource(RayTraceMeta {
+        let mut meta = RayTraceMeta {
             objects: StorageBuffer::default(),
             emissives: StorageBuffer::default(),
 
@@ -57,12 +58,21 @@ impl Plugin for RayTracePlugin {
             indices: StorageBuffer::default(),
             vertices: StorageBuffer::default(),
 
+            blas_size_descs: Vec::new(),
+            blases: Vec::new(),
+            tlas_package: None,
+            blas_build_queue: Vec::new(),
+
             handle_to_material: HashMap::new(),
             handle_to_texture: HashMap::new(),
             materials: StorageBuffer::default(),
             textures: StorageBuffer::default(),
             texture_data: StorageBuffer::default(),
-        });
+        };
+        meta.indices.add_usages(wgpu::BufferUsages::BLAS_INPUT);
+        meta.vertices.add_usages(wgpu::BufferUsages::BLAS_INPUT);
+
+        render_app.insert_resource(meta);
 
         render_app
             .add_systems(
@@ -117,6 +127,74 @@ impl ViewNode for RayTraceNode {
         &'static ViewTarget,
         &'static RayTraceSettings,
     );
+
+    fn update(&mut self, world: &mut World) {
+        let device = world.resource::<RenderDevice>();
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        let meta = world.resource::<RayTraceMeta>();
+        let mut build_entries = Vec::new();
+        for index in &meta.blas_build_queue {
+            let mesh = meta.meshes.get()[*index];
+            println!(
+                "{} {} {} {}",
+                mesh.start_vertex, mesh.vertex_count, mesh.start_index, mesh.index_count
+            );
+            let vertex_stride = std::mem::size_of::<GpuVertex>() as u32;
+            let triangle_geometry = wgpu::BlasTriangleGeometry {
+                size: &meta.blas_size_descs[*index],
+                vertex_buffer: meta.vertices.buffer().unwrap(),
+                first_vertex: mesh.start_vertex,
+                vertex_stride: vertex_stride as u64,
+                index_buffer: Some(meta.indices.buffer().unwrap()),
+                first_index: Some(mesh.start_index),
+                transform_buffer: None,
+                transform_buffer_offset: None,
+            };
+
+            build_entries.push(wgpu::BlasBuildEntry {
+                blas: &meta.blases[*index],
+                geometry: wgpu::BlasGeometries::TriangleGeometries(vec![triangle_geometry]),
+            });
+        }
+
+        let tlas = device
+            .wgpu_device()
+            .create_tlas(&wgpu::CreateTlasDescriptor {
+                label: Some("path_tracer_tlas"),
+                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+                max_instances: 8 * 8,
+            });
+        let mut tlas_package = wgpu::TlasPackage::new(tlas);
+
+        let meta_objects = meta.objects.get();
+        for i in 0..meta_objects.len() {
+            let instance = &mut tlas_package[i];
+
+            let obj: data::Object = meta_objects[i];
+            let transform: [f32; 12] = obj.local_to_world.transpose().to_cols_array()[..12]
+                .try_into()
+                .unwrap();
+
+            *instance = Some(wgpu::TlasInstance::new(
+                &meta.blases[obj.mesh as usize],
+                transform,
+                i as u32,
+                0xff,
+            ));
+        }
+
+        encoder.build_acceleration_structures(build_entries.iter(), [&tlas_package]);
+        world
+            .resource::<RenderQueue>()
+            .submit(Some(encoder.finish()));
+
+        let mut meta = world.resource_mut::<RayTraceMeta>();
+        meta.tlas_package = Some(tlas_package);
+        meta.blas_build_queue.clear();
+    }
 
     fn run<'w>(
         &self,
@@ -176,6 +254,7 @@ impl ViewNode for RayTraceNode {
                         meta.meshes.binding().unwrap(),
                         meta.indices.binding().unwrap(),
                         meta.vertices.binding().unwrap(),
+                        meta.tlas_package.as_ref().unwrap().as_binding(),
                     )),
                 ),
                 render_context.render_device().create_bind_group(
@@ -274,6 +353,7 @@ impl FromWorld for RayTracePipeline {
                         has_dynamic_offset: false,
                         min_binding_size: Some(Vec::<GpuVertex>::min_size()),
                     },
+                    BindingType::AccelerationStructure,
                 ),
             ),
         );
@@ -327,6 +407,7 @@ impl FromWorld for RayTracePipeline {
                     depth_stencil: None,
                     multisample: MultisampleState::default(),
                     push_constant_ranges: vec![],
+                    zero_initialize_workgroup_memory: true,
                 });
 
         Self {

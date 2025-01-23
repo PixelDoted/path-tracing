@@ -6,6 +6,10 @@ use bevy::{
         experimental::taa::{TemporalAntiAliasPlugin, TemporalAntiAliasing},
     },
     prelude::*,
+    render::{
+        settings::{RenderCreation, WgpuFeatures, WgpuSettings},
+        RenderPlugin,
+    },
 };
 use common::{FlyCam, FlyCamPlugin};
 use path_tracing::{RayTracePlugin, RayTraceSettings};
@@ -13,7 +17,17 @@ use path_tracing::{RayTracePlugin, RayTraceSettings};
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins.set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    features: WgpuFeatures::EXPERIMENTAL_RAY_QUERY
+                        | WgpuFeatures::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE,
+                    limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    backends: Some(wgpu::Backends::VULKAN),
+
+                    ..default()
+                }),
+                ..default()
+            }),
             RayTracePlugin,
             FlyCamPlugin,
             TemporalAntiAliasPlugin,
