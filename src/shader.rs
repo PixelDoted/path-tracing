@@ -222,7 +222,7 @@ impl ViewNode for RayTraceNode {
             render_context.render_device().create_bind_group(
                 "ray_trace_bind_group_0",
                 &ray_trace_pipeline.layout_0,
-                &BindGroupEntries::sequential((view_uniforms, globals_uniforms, settings_binding)),
+                &BindGroupEntries::sequential((view_uniforms, globals_uniforms)),
             )
         };
         let (bind_group_1, bind_group_meshes, bind_group_materials) = {
@@ -236,6 +236,7 @@ impl ViewNode for RayTraceNode {
                     "ray_trace_bind_group_1",
                     &ray_trace_pipeline.layout_1,
                     &BindGroupEntries::sequential((
+                        settings_binding,
                         meta.objects.binding().unwrap(),
                         meta.emissives.binding().unwrap(),
                     )),
@@ -304,7 +305,6 @@ impl FromWorld for RayTracePipeline {
                 (
                     uniform_buffer::<ViewUniform>(true),
                     uniform_buffer::<GlobalsUniform>(false),
-                    uniform_buffer::<RayTraceSettings>(false),
                 ),
             ),
         );
@@ -313,6 +313,7 @@ impl FromWorld for RayTracePipeline {
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
+                    uniform_buffer::<RayTraceSettings>(false),
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,

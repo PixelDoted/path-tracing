@@ -65,7 +65,7 @@ fn setup(
     ));
 
     let cube = meshes.add(Cuboid::from_length(1.0));
-    let cube_half = meshes.add(Cuboid::from_length(0.5)); // HACK: Transform scaling doesn't work
+    let cube_half = meshes.add(Cuboid::from_length(0.5)); // HACK: Transform scaling is bugged
 
     commands.spawn((
         Mesh3d(cube.clone()),

@@ -14,10 +14,10 @@ const T_MAX: f32 = 1000.0;
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
-@group(0) @binding(2) var<uniform> settings: Settings;
 
-@group(1) @binding(0) var<storage> objects: array<Object>;
-@group(1) @binding(1) var<storage> emissives: array<u32>;
+@group(1) @binding(0) var<uniform> settings: Settings;
+@group(1) @binding(1) var<storage> objects: array<Object>;
+@group(1) @binding(2) var<storage> emissives: array<u32>;
 
 @group(2) @binding(0) var<storage> meshes: array<Mesh>;
 @group(2) @binding(1) var<storage> indices: array<u32>;
@@ -264,7 +264,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
         for (var bounce = 0u; bounce < settings.bounces; bounce++) {
             var rq: ray_query;
-            rayQueryInitialize(&rq, acc_struct, RayDesc(0u, 0xFFu, T_MIN, T_MAX, ray.pos, ray.dir));
+            rayQueryInitialize(&rq, acc_struct, RayDesc(RAY_FLAG_CULL_BACK_FACING, 0xFFu, T_MIN, T_MAX, ray.pos, ray.dir));
             rayQueryProceed(&rq);
 
             let intersection = rayQueryGetCommittedIntersection(&rq);
